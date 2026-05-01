@@ -256,6 +256,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	private markdownDrainPromise: Promise<void> | null = null;
 	private markdownDrainTimer: ReturnType<typeof setTimeout> | null = null;
 	private lastMarkdownDirtyAt = 0;
+	/** Tracks Obsidian-default "Untitled*" files awaiting rename before CRDT seeding. */
+	private untitledCreateState = new Map<string, "deferred" | "ready">();
 	private boundRecoveryLocks = new Map<string, number>();
 
 	/** Last time a reconciliation completed (for cooldown). */
@@ -1885,10 +1887,32 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const abstractFile = this.app.vault.getAbstractFileByPath(path);
 		if (!(abstractFile instanceof TFile)) {
 			this.log(`Markdown ${reason}: "${path}" no longer exists, skipping`);
+			this.untitledCreateState.delete(path);
 			return;
 		}
 
 		if (reason === "create") {
+			// Obsidian creates new notes as "Untitled.md" (or "Untitled 2.md", etc.)
+			// and fires a rename event shortly after the user types a name. If the
+			// drain settles before the rename fires, "Untitled.md" gets seeded into
+			// the CRDT and propagates to other vaults as a ghost file. Defer the
+			// first pass by 700ms to give the rename event time to arrive.
+			const basename = path.split("/").pop() ?? "";
+			if (/^[Uu]ntitled(\s+\d+)?\.md$/.test(basename)) {
+				const state = this.untitledCreateState.get(path);
+				if (state !== "ready") {
+					this.untitledCreateState.set(path, "deferred");
+					setTimeout(() => {
+						this.untitledCreateState.set(path, "ready");
+						this.dirtyMarkdownPaths.set(path, "create");
+						this.kickMarkdownDrain();
+					}, 700);
+					this.log(`Create: "${path}" deferred 700ms (Untitled rename window)`);
+					return;
+				}
+				this.untitledCreateState.delete(path);
+			}
+
 			if (await this.diskMirror?.shouldSuppressCreate(abstractFile)) {
 				this.log(`Suppressed create event for "${path}"`);
 				return;

@@ -91,6 +91,9 @@ export class DiskMirror {
 		{ ytext: import("yjs").Text; handler: (event: import("yjs").YTextEvent, txn: import("yjs").Transaction) => void }
 	>();
 
+	/** Retry counts for frontmatter-blocked writes (cleared on success). */
+	private blockedWriteRetries = new Map<string, number>();
+
 	private mapObserverCleanups: (() => void)[] = [];
 
 	private readonly debug: boolean;
@@ -458,17 +461,21 @@ export class DiskMirror {
 				const currentContent = await this.app.vault.read(existing);
 				if (currentContent === content) {
 					this.log(`flushWrite: "${path}" unchanged, skipping`);
+					this.blockedWriteRetries.delete(path);
 					return;
 				}
 				if (this.shouldBlockFrontmatterWrite(path, currentContent, content)) {
+					this.scheduleBlockedWriteRetry(path);
 					return;
 				}
 
 				await this.suppressWrite(path, content);
 				await this.app.vault.modify(existing, content);
+				this.blockedWriteRetries.delete(path);
 				this.log(`flushWrite: updated "${path}" (${content.length} chars)`);
 			} else {
 				if (this.shouldBlockFrontmatterWrite(path, null, content)) {
+					this.scheduleBlockedWriteRetry(path);
 					return;
 				}
 				await this.suppressWrite(path, content);
@@ -481,6 +488,7 @@ export class DiskMirror {
 					}
 				}
 				await this.app.vault.create(normalized, content);
+				this.blockedWriteRetries.delete(path);
 				this.log(
 					`flushWrite: created "${path}" on disk (${content.length} chars)`,
 				);
@@ -488,6 +496,23 @@ export class DiskMirror {
 		} catch (err) {
 			console.error(`[yaos] flushWrite failed for "${path}":`, err);
 		}
+	}
+
+	private scheduleBlockedWriteRetry(path: string): void {
+		const MAX_RETRIES = 3;
+		const RETRY_MS = 5_000;
+		const retries = (this.blockedWriteRetries.get(path) ?? 0) + 1;
+		if (retries > MAX_RETRIES) {
+			this.log(`flushWrite: frontmatter blocked for "${path}" — max retries reached, giving up`);
+			this.blockedWriteRetries.delete(path);
+			return;
+		}
+		this.blockedWriteRetries.set(path, retries);
+		this.log(`flushWrite: frontmatter blocked for "${path}", retry ${retries}/${MAX_RETRIES} in ${RETRY_MS}ms`);
+		setTimeout(() => {
+			this.writeQueue.add(path);
+			void this.kickDrain();
+		}, RETRY_MS);
 	}
 
 	private shouldBlockFrontmatterWrite(
