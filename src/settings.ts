@@ -300,8 +300,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 		const setupIncomplete = !this.plugin.settings.host || !this.plugin.settings.token;
 		const syncStatus = this.plugin.getSettingsStatusSummary();
 
-		addSectionHeading(containerEl, "YAOS");
-
 		if (setupIncomplete) {
 			const callout = containerEl.createDiv({ cls: "callout yaos-settings-setup-callout" });
 			callout.setAttr("data-callout", "warning");
@@ -354,7 +352,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				cls: `yaos-settings-status-badge ${statusClass(syncStatus.state)}`,
 			});
 
-			addCardRow(card, "Status", syncStatus.label);
 			addCardRow(card, "Server", this.plugin.settings.host);
 			addCardRow(card, "Vault", shortenMiddle(this.plugin.settings.vaultId || "(not set)"));
 			addCardRow(card, "This device", this.plugin.settings.deviceName || "(unnamed)");
@@ -389,12 +386,10 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			addCardRow(updateCard, "Server version", updateState.serverVersion ?? "Unknown");
 			addCardRow(updateCard, "Latest server", updateState.latestServerVersion ?? "Unknown");
 			addCardRow(updateCard, "Plugin version", updateState.pluginVersion);
-			addCardRow(updateCard, "Latest plugin", updateState.latestPluginVersion ?? "Unknown");
-			addCardRow(
-				updateCard,
-				"Update path",
-				updateState.updateRepoUrl ?? "Not configured",
-			);
+			if (updateState.updateRepoUrl) {
+				addCardRow(updateCard, "Latest plugin", updateState.latestPluginVersion ?? "Unknown");
+				addCardRow(updateCard, "Update path", updateState.updateRepoUrl);
+			}
 
 			const summaryText = updateState.serverUpdateAvailable
 				? updateState.migrationRequired
@@ -402,11 +397,17 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					: "A server update is available."
 				: updateState.pluginUpdateRecommended
 					? "This device should update the YAOS plugin soon."
-					: "Server and plugin are up to date with the latest cached manifest.";
+					: "Server is up to date.";
 			updateCard.createEl("p", {
 				text: summaryText,
 				cls: "yaos-settings-status-subtitle",
 			});
+			if (!updateState.updateRepoUrl) {
+				updateCard.createEl("p", {
+					text: "Set a deployment repo URL in Advanced to enable plugin update tracking.",
+					cls: "yaos-settings-status-subtitle",
+				});
+			}
 
 			if (updateState.pluginCompatibilityWarning) {
 				updateCard.createEl("p", {
@@ -455,39 +456,51 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}),
 			);
-
-		addSectionHeading(containerEl, "What syncs");
-			new Setting(containerEl)
-				.setName("Sync only these folders")
-				.setDesc("Comma-separated folder paths to sync exclusively. If set, only files inside these folders are synced. Leave empty to sync everything (minus excluded paths). Example: Projects/Shared/, Team Notes/")
-				.addText((text) =>
-					text
-						.setPlaceholder("Example: Projects/Shared/, Team Notes/")
-						.setValue(this.plugin.settings.includePaths)
-						.onChange(async (value) => {
-							this.plugin.settings.includePaths = value;
-							await this.plugin.saveSettings();
-							this.plugin.onSettingsChanged();
-						}),
-			);
-
-			new Setting(containerEl)
-				.setName("Exclude paths")
-				.setDesc("Comma-separated path prefixes to skip. Example: templates/, .trash/, daily-notes/")
-				.addText((text) =>
-					text
-						.setPlaceholder("Example: templates/, daily-notes/")
-						.setValue(this.plugin.settings.excludePatterns)
-						.onChange(async (value) => {
-							this.plugin.settings.excludePatterns = value;
-							await this.plugin.saveSettings();
-							this.plugin.onSettingsChanged();
+		new Setting(containerEl)
+			.setName("Show remote cursors")
+			.setDesc("Show other devices' cursors and selections while editing.")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.showRemoteCursors)
+					.onChange(async (value) => {
+						this.plugin.settings.showRemoteCursors = value;
+						await this.plugin.saveSettings();
+						this.plugin.applyCursorVisibility();
 					}),
 			);
 
-			new Setting(containerEl)
-				.setName("Max text file size in kilobytes")
-				.setDesc("Text files larger than this are skipped for live document sync.")
+		addSectionHeading(containerEl, "Sync filters");
+		new Setting(containerEl)
+			.setName("Folders to sync")
+			.setDesc("Only sync files inside these folders. Leave empty to sync everything. Example: Projects/Shared/, Team Notes/")
+			.addText((text) =>
+				text
+					.setPlaceholder("Example: Projects/Shared/, Team Notes/")
+					.setValue(this.plugin.settings.includePaths)
+					.onChange(async (value) => {
+						this.plugin.settings.includePaths = value;
+						await this.plugin.saveSettings();
+						this.plugin.onSettingsChanged();
+					}),
+		);
+
+		new Setting(containerEl)
+			.setName("Excluded paths")
+			.setDesc("Comma-separated path prefixes to skip. Example: templates/, .trash/, daily-notes/")
+			.addText((text) =>
+				text
+					.setPlaceholder("Example: templates/, daily-notes/")
+					.setValue(this.plugin.settings.excludePatterns)
+					.onChange(async (value) => {
+						this.plugin.settings.excludePatterns = value;
+						await this.plugin.saveSettings();
+						this.plugin.onSettingsChanged();
+				}),
+		);
+
+		new Setting(containerEl)
+			.setName("Max note size (KB)")
+			.setDesc("Notes larger than this are skipped.")
 			.addText((text) =>
 				text
 					.setPlaceholder("2048")
@@ -500,51 +513,48 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 							this.plugin.onSettingsChanged();
 						}
 					}),
+		);
+
+		addSectionHeading(containerEl, "Attachments");
+
+		if (this.plugin.settings.host) {
+			new Setting(containerEl)
+				.setName("Attachment storage")
+				.setDesc(
+					attachmentsAvailable
+						? "Available on this server. The plugin can sync attachments and snapshots."
+						: "Not available on this server. Add object storage in Cloudflare, then redeploy.",
+				)
+				.addButton((button) =>
+					button
+					.setButtonText("Refresh")
+					.onClick(async () => {
+						button.setDisabled(true);
+						await this.plugin.refreshServerCapabilities();
+						await this.plugin.refreshAttachmentSyncRuntime("capability-refresh");
+						this.display();
+					}),
 			);
-
-				addSectionHeading(containerEl, "Attachments");
-
-			if (this.plugin.settings.host) {
-				new Setting(containerEl)
-					.setName("Attachment storage")
-					.setDesc(
-						attachmentsAvailable
-							? "Available on this server. The plugin can sync attachments and snapshots."
-							: "Not available on this server. Add object storage in Cloudflare, then redeploy.",
-					)
-					.addButton((button) =>
-						button
-						.setButtonText("Refresh")
-						.onClick(async () => {
-							button.setDisabled(true);
-							await this.plugin.refreshServerCapabilities();
-							await this.plugin.refreshAttachmentSyncRuntime("capability-refresh");
-							this.display();
-						}),
-				);
 		}
 
-				if (this.plugin.settings.host && !attachmentsAvailable) {
-					const callout = containerEl.createDiv({ cls: "yaos-settings-attachment-callout" });
-					callout.createEl("p", {
-						text: "Images, PDFs, and other attachments are not syncing yet.",
-					});
-					callout.createEl("p", {
-						text: "Add a Cloudflare R2 bucket to enable attachment sync. It takes about a minute.",
-					});
-					const link = callout.createEl("a", {
-						text: "Watch the 1-minute setup video",
-						href: "https://youtu.be/Z7xCMEYfdFM",
-					});
-					link.setAttr("target", "_blank");
-				}
+		if (this.plugin.settings.host && !attachmentsAvailable) {
+			const noR2Note = containerEl.createDiv({ cls: "yaos-settings-attachment-callout" });
+			const noR2Text = noR2Note.createEl("p", { cls: "yaos-settings-status-subtitle" });
+			noR2Text.appendText("Attachment sync requires a Cloudflare R2 bucket — ");
+			const setupLink = noR2Text.createEl("a", {
+				text: "watch the 1-minute setup guide",
+				href: "https://youtu.be/Z7xCMEYfdFM",
+			});
+			setupLink.setAttr("target", "_blank");
+			noR2Text.appendText(".");
+		}
 
 		if (attachmentsAvailable || !this.plugin.settings.host) {
-				new Setting(containerEl)
-					.setName("Sync attachments")
-					.setDesc(
-						"Sync images, PDF files, and other attachments through object storage. This is enabled by default when the server supports it.",
-					)
+			new Setting(containerEl)
+				.setName("Sync attachments")
+				.setDesc(
+					"Sync images, PDF files, and other attachments through object storage. This is enabled by default when the server supports it.",
+				)
 				.addToggle((toggle) =>
 					toggle
 						.setValue(this.plugin.settings.enableAttachmentSync)
@@ -558,10 +568,10 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				);
 		}
 
-			if ((attachmentsAvailable || !this.plugin.settings.host) && this.plugin.settings.enableAttachmentSync) {
-				new Setting(containerEl)
-					.setName("Max attachment size in kilobytes")
-					.setDesc("Attachments larger than this are skipped.")
+		if ((attachmentsAvailable || !this.plugin.settings.host) && this.plugin.settings.enableAttachmentSync) {
+			new Setting(containerEl)
+				.setName("Max attachment size (KB)")
+				.setDesc("Attachments larger than this are skipped.")
 				.addText((text) =>
 					text
 						.setPlaceholder("10240")
@@ -576,8 +586,8 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				);
 
 			new Setting(containerEl)
-				.setName("Parallel transfers")
-				.setDesc("Default 1 favors reliability on slow or mobile networks.")
+				.setName("Upload/download slots")
+				.setDesc("Simultaneous transfers. Default 1 is safest on mobile.")
 				.addSlider((slider) =>
 					slider
 						.setLimits(1, 5, 1)
@@ -589,20 +599,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						}),
 				);
 		}
-
-		addSectionHeading(containerEl, "Collaboration");
-		new Setting(containerEl)
-			.setName("Show remote cursors")
-			.setDesc("Show other devices' cursors and selections while editing.")
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.showRemoteCursors)
-					.onChange(async (value) => {
-						this.plugin.settings.showRemoteCursors = value;
-						await this.plugin.saveSettings();
-						this.plugin.applyCursorVisibility();
-					}),
-			);
 
 		const manualDetails = createDetailsSection(containerEl, "Manual connection", setupIncomplete);
 		const manualBody = manualDetails.createDiv({ cls: "yaos-settings-details-body" });
