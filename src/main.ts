@@ -2575,6 +2575,14 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		};
 	}
 
+	updateAwarenessDeviceName(name: string): void {
+		this.vaultSync?.provider?.awareness?.setLocalStateField("user", {
+			name: name || "unnamed",
+			color: "#30bced",
+			colorLight: "#30bced33",
+		});
+	}
+
 	getConnectedDevices(): { name: string; isLocal: boolean }[] {
 		const awareness = this.vaultSync?.provider?.awareness;
 		if (!awareness) return [];

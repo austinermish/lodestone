@@ -385,13 +385,12 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			addCardRow(card, "This device", this.plugin.settings.deviceName || "(unnamed)");
 
 			const connectedDevices = this.plugin.getConnectedDevices();
-			if (connectedDevices.length > 0) {
-				const othersOnline = connectedDevices.filter((d) => !d.isLocal);
-				const deviceListValue = othersOnline.length > 0
-					? othersOnline.map((d) => d.name).join(", ")
-					: "None online";
-				addCardRow(card, "Connected devices", deviceListValue);
-			}
+			const othersOnline = connectedDevices.filter((d) => !d.isLocal);
+			addCardRow(
+				card,
+				"Devices in vault",
+				othersOnline.length > 0 ? othersOnline.map((d) => d.name).join(", ") : "None online",
+			);
 
 			const actionRow = card.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
 
@@ -491,6 +490,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.deviceName = value.trim();
 						await this.plugin.saveSettings();
+						this.plugin.updateAwarenessDeviceName(value.trim());
 					}),
 			);
 		new Setting(containerEl)
