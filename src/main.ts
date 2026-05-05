@@ -492,7 +492,19 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			this.startBlobSyncEngine("startup", false);
 
 			// 5. Status tracking
-			this.vaultSync.provider.on("status", () => this.refreshStatusBar());
+			this.vaultSync.provider.on("status", ({ status }: { status: string }) => {
+				this.refreshStatusBar();
+				if (status === "connected") {
+					// Advertise this device in awareness so peers can enumerate connected devices
+					// even when no file is open in an editor (editor binding sets the same field
+					// per-file, but only while a file is active).
+					this.vaultSync?.provider?.awareness?.setLocalStateField("user", {
+						name: this.settings.deviceName || "unnamed",
+						color: "#30bced",
+						colorLight: "#30bced33",
+					});
+				}
+			});
 			this.statusInterval = setInterval(() => {
 				this.refreshStatusBar();
 				if (this.reconciled && this.editorBindings) {
@@ -2561,6 +2573,19 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			state,
 			label: this.getSyncStatusLabel(state).replace(/^CRDT:\s*/, ""),
 		};
+	}
+
+	getConnectedDevices(): { name: string; isLocal: boolean }[] {
+		const awareness = this.vaultSync?.provider?.awareness;
+		if (!awareness) return [];
+		const result: { name: string; isLocal: boolean }[] = [];
+		for (const [clientId, state] of awareness.getStates()) {
+			const name = (state as Record<string, { name?: string } | undefined>)?.user?.name;
+			if (name) {
+				result.push({ name, isLocal: clientId === awareness.clientID });
+			}
+		}
+		return result;
 	}
 
 	private updateStatusBar(state: SyncStatus): void {

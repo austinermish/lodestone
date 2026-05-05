@@ -1,4 +1,4 @@
-import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, FuzzySuggestModal, Modal, Notice, PluginSettingTab, Setting, TFolder } from "obsidian";
 import * as QRCode from "qrcode";
 import type VaultCrdtSyncPlugin from "./main";
 import { randomBase64Url } from "./utils/base64url";
@@ -283,6 +283,34 @@ class RecoveryKitModal extends Modal {
 	}
 }
 
+class FolderPickerModal extends FuzzySuggestModal<TFolder> {
+	constructor(app: App, private onChoose: (folder: TFolder) => void) {
+		super(app);
+		this.setPlaceholder("Type to search folders…");
+	}
+
+	getItems(): TFolder[] {
+		return this.app.vault.getAllLoadedFiles()
+			.filter((f): f is TFolder => f instanceof TFolder)
+			.sort((a, b) => a.path.localeCompare(b.path));
+	}
+
+	getItemText(folder: TFolder): string {
+		return folder.path;
+	}
+
+	onChooseItem(folder: TFolder): void {
+		this.onChoose(folder);
+	}
+}
+
+function appendFolderPath(current: string, folderPath: string): string {
+	const entry = folderPath.endsWith("/") ? folderPath : `${folderPath}/`;
+	const parts = current ? current.split(",").map((s) => s.trim()).filter(Boolean) : [];
+	if (!parts.includes(entry)) parts.push(entry);
+	return parts.join(", ");
+}
+
 export class VaultSyncSettingTab extends PluginSettingTab {
 	plugin: VaultCrdtSyncPlugin;
 
@@ -352,9 +380,18 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				cls: `yaos-settings-status-badge ${statusClass(syncStatus.state)}`,
 			});
 
-			addCardRow(card, "Server", this.plugin.settings.host);
-			addCardRow(card, "Vault", shortenMiddle(this.plugin.settings.vaultId || "(not set)"));
+			addCardRow(card, "Host server", this.plugin.settings.host);
+			addCardRow(card, "Host vault", shortenMiddle(this.plugin.settings.vaultId || "(not set)"));
 			addCardRow(card, "This device", this.plugin.settings.deviceName || "(unnamed)");
+
+			const connectedDevices = this.plugin.getConnectedDevices();
+			if (connectedDevices.length > 0) {
+				const othersOnline = connectedDevices.filter((d) => !d.isLocal);
+				const deviceListValue = othersOnline.length > 0
+					? othersOnline.map((d) => d.name).join(", ")
+					: "None online";
+				addCardRow(card, "Connected devices", deviceListValue);
+			}
 
 			const actionRow = card.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
 
@@ -472,7 +509,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 		addSectionHeading(containerEl, "Sync filters");
 		new Setting(containerEl)
 			.setName("Folders to sync")
-			.setDesc("Only sync files inside these folders. Leave empty to sync everything. Example: Projects/Shared/, Team Notes/")
+			.setDesc("Only sync files inside these folders. Separate multiple folders with commas. Leave empty to sync everything. Example: Projects/Shared/, Team Notes/")
 			.addText((text) =>
 				text
 					.setPlaceholder("Example: Projects/Shared/, Team Notes/")
@@ -482,11 +519,26 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						this.plugin.onSettingsChanged();
 					}),
-		);
+			)
+			.addButton((btn) =>
+				btn
+					.setButtonText("Add folder")
+					.onClick(() => {
+						new FolderPickerModal(this.app, async (folder) => {
+							this.plugin.settings.includePaths = appendFolderPath(
+								this.plugin.settings.includePaths,
+								folder.path,
+							);
+							await this.plugin.saveSettings();
+							this.plugin.onSettingsChanged();
+							this.display();
+						}).open();
+					}),
+			);
 
 		new Setting(containerEl)
 			.setName("Excluded paths")
-			.setDesc("Comma-separated path prefixes to skip. Example: templates/, .trash/, daily-notes/")
+			.setDesc("Paths to skip, separated by commas. Example: templates/, .trash/, daily-notes/")
 			.addText((text) =>
 				text
 					.setPlaceholder("Example: templates/, daily-notes/")
@@ -495,8 +547,23 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						this.plugin.settings.excludePatterns = value;
 						await this.plugin.saveSettings();
 						this.plugin.onSettingsChanged();
-				}),
-		);
+					}),
+			)
+			.addButton((btn) =>
+				btn
+					.setButtonText("Add folder")
+					.onClick(() => {
+						new FolderPickerModal(this.app, async (folder) => {
+							this.plugin.settings.excludePatterns = appendFolderPath(
+								this.plugin.settings.excludePatterns,
+								folder.path,
+							);
+							await this.plugin.saveSettings();
+							this.plugin.onSettingsChanged();
+							this.display();
+						}).open();
+					}),
+			);
 
 		new Setting(containerEl)
 			.setName("Max note size (KB)")
