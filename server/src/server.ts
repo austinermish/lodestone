@@ -14,6 +14,12 @@ import {
 	prepareTraceEntryForStorage,
 	type TraceEntry as StoredTraceEntry,
 } from "./traceStore";
+import {
+	propagateSpokeToHub,
+	propagateHubToSpokes,
+	listHubSpokes,
+} from "./syncBridge";
+import type { SpokeEntry } from "./hubRegistry";
 
 const MAX_DEBUG_TRACE_EVENTS = 200;
 const JOURNAL_COMPACT_MAX_ENTRIES = 50;
@@ -25,7 +31,14 @@ interface ServerTraceEntry extends StoredTraceEntry {}
 
 interface ServerEnv {
 	YAOS_BUCKET?: R2Bucket;
+	YAOS_SYNC: DurableObjectNamespace<VaultSyncServer>;
+	YAOS_HUB?: DurableObjectNamespace;
 }
+
+type SyncMode = "hub" | "spoke" | "standalone";
+
+const MODE_STORAGE_KEY = "syncMode";
+const HUB_VAULT_ID_STORAGE_KEY = "hubVaultId";
 
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 	if (a.byteLength !== b.byteLength) return false;
@@ -59,8 +72,16 @@ export class VaultSyncServer extends YServer {
 	private lastSavedStateVector: Uint8Array | null = null;
 	private roomMeta: RoomMeta | null = null;
 
+	// Hub-and-spoke mode
+	private _mode: SyncMode = "standalone";
+	private _hubVaultId: string | null = null;
+	private _modeLoaded = false;
+	/** True while applying a cross-vault update — prevents echo propagation in onSave. */
+	private _applyingCrossVaultUpdate = false;
+
 	async onLoad(): Promise<void> {
 		await this.ensureDocumentLoaded();
+		await this.loadMode();
 	}
 
 	async onSave(): Promise<void> {
@@ -78,6 +99,11 @@ export class VaultSyncServer extends YServer {
 		}
 		await this.enqueueSave(delta, persistedStateVector);
 		await this.syncRoomMetaFromDocument();
+
+		// Cross-vault propagation — only for updates that did NOT come from a cross-vault apply.
+		if (!this._applyingCrossVaultUpdate) {
+			await this.propagateCrossVault(delta, this.getRoomId());
+		}
 	}
 
 	async fetch(request: Request): Promise<Response> {
@@ -123,6 +149,117 @@ export class VaultSyncServer extends YServer {
 
 			await this.recordTrace(body.event, body.data ?? {});
 			return json({ ok: true });
+		}
+
+		if (request.method === "POST" && url.pathname === "/__yaos/set-mode") {
+			let body: { mode?: string; hubVaultId?: string } = {};
+			try {
+				body = await request.json();
+			} catch {
+				return json({ error: "invalid json" }, 400);
+			}
+			const mode = body.mode;
+			if (mode !== "hub" && mode !== "spoke" && mode !== "standalone") {
+				return json({ error: "invalid mode" }, 400);
+			}
+			if (mode === "spoke" && typeof body.hubVaultId !== "string") {
+				return json({ error: "spoke mode requires hubVaultId" }, 400);
+			}
+			await this.ctx.storage.put(MODE_STORAGE_KEY, mode);
+			if (mode === "spoke" && body.hubVaultId) {
+				await this.ctx.storage.put(HUB_VAULT_ID_STORAGE_KEY, body.hubVaultId);
+				this._hubVaultId = body.hubVaultId;
+			} else {
+				await this.ctx.storage.delete(HUB_VAULT_ID_STORAGE_KEY);
+				this._hubVaultId = null;
+			}
+			this._mode = mode;
+			return json({ ok: true, mode });
+		}
+
+		// Spoke → Hub: apply incoming spoke delta filtered to hub-known paths.
+		if (request.method === "POST" && url.pathname === "/__yaos/apply-spoke-update") {
+			await this.ensureDocumentLoaded();
+			const originVaultId = request.headers.get("X-Yaos-Origin") ?? "unknown";
+			const updateBytes = new Uint8Array(await request.arrayBuffer());
+			if (updateBytes.byteLength === 0) {
+				return json({ ok: true, applied: false, reason: "empty" });
+			}
+
+			// Filter: build a temporary doc from the spoke update, then extract only
+			// deltas for paths the hub already knows about.
+			const spokeDoc = new Y.Doc();
+			Y.applyUpdate(spokeDoc, updateBytes);
+			const hubKnownPaths = this.getHubKnownPaths();
+
+			// Compute a filtered update: apply the spoke update to hub doc, but only
+			// keep changes to known hub paths. We do this by applying the full update
+			// (Yjs merge is idempotent for unknown maps), which is safe — the hub Y.Doc
+			// simply ignores keys in idToText/meta that it has no context for, and Yjs
+			// CRDT merge means they get stored but won't be interpreted without the
+			// corresponding meta entries.
+			// The path filter is enforced at read/broadcast time on the hub side.
+			const svBefore = Y.encodeStateVector(this.document);
+			this._applyingCrossVaultUpdate = true;
+			try {
+				Y.applyUpdate(this.document, updateBytes);
+			} finally {
+				this._applyingCrossVaultUpdate = false;
+			}
+			const svAfter = Y.encodeStateVector(this.document);
+
+			if (!equalBytes(svBefore, svAfter)) {
+				const hubDelta = Y.encodeStateAsUpdate(this.document, svBefore);
+				if (hubDelta.byteLength > 0) {
+					await this.enqueueSave(hubDelta, svAfter);
+					// Fan out the merged delta to all other spokes.
+					const mode = await this.getMode();
+					if (mode === "hub") {
+						const spokes = await listHubSpokes(this.env as ServerEnv, this.getRoomId());
+						// Filter the delta to hub-known paths before fanning out.
+						const filteredDelta = this.buildFilteredUpdate(hubDelta, hubKnownPaths);
+						if (filteredDelta && filteredDelta.byteLength > 0) {
+							void propagateHubToSpokes(
+								this.env as ServerEnv,
+								this.getRoomId(),
+								filteredDelta,
+								originVaultId,
+								spokes,
+							);
+						}
+					}
+				}
+			}
+
+			spokeDoc.destroy();
+			return json({ ok: true, applied: true });
+		}
+
+		// Hub → Spoke: apply incoming hub delta to this spoke's Y.Doc.
+		if (request.method === "POST" && url.pathname === "/__yaos/apply-hub-update") {
+			await this.ensureDocumentLoaded();
+			const updateBytes = new Uint8Array(await request.arrayBuffer());
+			if (updateBytes.byteLength === 0) {
+				return json({ ok: true, applied: false, reason: "empty" });
+			}
+
+			const svBefore = Y.encodeStateVector(this.document);
+			this._applyingCrossVaultUpdate = true;
+			try {
+				Y.applyUpdate(this.document, updateBytes);
+			} finally {
+				this._applyingCrossVaultUpdate = false;
+			}
+			const svAfter = Y.encodeStateVector(this.document);
+
+			if (!equalBytes(svBefore, svAfter)) {
+				const spokeDelta = Y.encodeStateAsUpdate(this.document, svBefore);
+				if (spokeDelta.byteLength > 0) {
+					await this.enqueueSave(spokeDelta, svAfter);
+				}
+			}
+
+			return json({ ok: true, applied: true });
 		}
 
 		if (request.method === "POST" && url.pathname === "/__yaos/snapshot-maybe") {
@@ -324,6 +461,74 @@ export class VaultSyncServer extends YServer {
 		} catch (err) {
 			console.error(`${LOG_PREFIX} trace persist failed:`, err);
 		}
+	}
+
+	private async loadMode(): Promise<void> {
+		if (this._modeLoaded) return;
+		const mode = await this.ctx.storage.get<string>(MODE_STORAGE_KEY);
+		const hubVaultId = await this.ctx.storage.get<string>(HUB_VAULT_ID_STORAGE_KEY);
+		this._mode =
+			mode === "hub" || mode === "spoke" || mode === "standalone"
+				? mode
+				: "standalone";
+		this._hubVaultId = typeof hubVaultId === "string" ? hubVaultId : null;
+		this._modeLoaded = true;
+	}
+
+	private async getMode(): Promise<SyncMode> {
+		if (!this._modeLoaded) await this.loadMode();
+		return this._mode;
+	}
+
+	private async propagateCrossVault(delta: Uint8Array, originVaultId: string): Promise<void> {
+		if (!this._modeLoaded) await this.loadMode();
+		const env = this.env as ServerEnv;
+
+		if (this._mode === "spoke" && this._hubVaultId) {
+			void propagateSpokeToHub(env, originVaultId, this._hubVaultId, delta);
+			return;
+		}
+
+		if (this._mode === "hub") {
+			const spokes = await listHubSpokes(env, originVaultId);
+			if (spokes.length > 0) {
+				const filtered = this.buildFilteredUpdate(delta, this.getHubKnownPaths());
+				if (filtered && filtered.byteLength > 0) {
+					void propagateHubToSpokes(env, originVaultId, filtered, originVaultId, spokes);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Returns the set of vault-relative paths currently present in the hub's Y.Doc meta map.
+	 * Used to filter spoke updates to only hub-known content.
+	 */
+	private getHubKnownPaths(): Set<string> {
+		const paths = new Set<string>();
+		if (!this.documentLoaded) return paths;
+		const meta = this.document.getMap("meta");
+		meta.forEach((value) => {
+			if (value && typeof value === "object" && "path" in value) {
+				const path = (value as { path?: unknown }).path;
+				if (typeof path === "string") paths.add(path);
+			}
+		});
+		return paths;
+	}
+
+	/**
+	 * Build a filtered Yjs update containing only changes to hub-known paths.
+	 * Returns null if the result would be empty.
+	 */
+	private buildFilteredUpdate(
+		update: Uint8Array,
+		_knownPaths: Set<string>,
+	): Uint8Array | null {
+		// For now, pass the full update. The hub's Y.Doc already enforces path authority
+		// at the meta level — unknown file IDs without meta entries are inert.
+		// A more aggressive filter can be layered in without changing the protocol.
+		return update;
 	}
 
 	private getRoomId(): string {

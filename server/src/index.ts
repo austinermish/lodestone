@@ -3,6 +3,7 @@ import * as Y from "yjs";
 import { mapWithConcurrency } from "./concurrency";
 import { sha256Hex } from "./hex";
 import { ServerConfig, type StoredServerConfig } from "./config";
+import { HubRegistry, type SpokeEntry } from "./hubRegistry";
 import {
 	blobKey,
 	createSnapshot,
@@ -35,6 +36,7 @@ interface Env {
 	YAOS_CANONICAL_REPO?: string;
 	YAOS_SYNC: DurableObjectNamespace<VaultSyncServer>;
 	YAOS_CONFIG: DurableObjectNamespace;
+	YAOS_HUB: DurableObjectNamespace;
 	YAOS_BUCKET?: R2Bucket;
 }
 
@@ -509,6 +511,93 @@ async function handleBlobDownload(
 	return new Response(object.body, { headers });
 }
 
+function getHubRegistryStub(env: Env, hubVaultId: string): DurableObjectStub {
+	const id = env.YAOS_HUB.idFromName(hubVaultId);
+	return env.YAOS_HUB.get(id);
+}
+
+async function listHubSpokes(env: Env, hubVaultId: string): Promise<SpokeEntry[]> {
+	try {
+		const stub = getHubRegistryStub(env, hubVaultId);
+		const res = await stub.fetch("https://internal/__yaos/hub/spokes");
+		if (!res.ok) return [];
+		const payload: { spokes?: SpokeEntry[] } = await res.json();
+		return Array.isArray(payload.spokes) ? payload.spokes : [];
+	} catch {
+		return [];
+	}
+}
+
+async function setVaultMode(
+	env: Env,
+	vaultId: string,
+	mode: "hub" | "spoke" | "standalone",
+	hubVaultId?: string,
+): Promise<void> {
+	try {
+		const stub = await getServerByName(env.YAOS_SYNC, vaultId);
+		await stub.fetch("https://internal/__yaos/set-mode", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ mode, hubVaultId }),
+		});
+	} catch (err) {
+		console.warn(`${LOG_PREFIX} set-mode failed for ${vaultId}:`, err);
+	}
+}
+
+async function handleHubSpokeRegister(
+	env: Env,
+	hubVaultId: string,
+	req: Request,
+): Promise<Response> {
+	let body: { spokeVaultId?: string; deviceName?: string } = {};
+	try {
+		body = await req.json();
+	} catch {
+		return json({ error: "invalid json" }, 400);
+	}
+
+	if (typeof body.spokeVaultId !== "string" || body.spokeVaultId.trim().length < 8) {
+		return json({ error: "invalid spokeVaultId" }, 400);
+	}
+
+	const spokeVaultId = body.spokeVaultId.trim();
+	const deviceName =
+		typeof body.deviceName === "string" ? body.deviceName.trim() : "Unknown Device";
+
+	// Register in HubRegistry
+	const hubStub = getHubRegistryStub(env, hubVaultId);
+	const regRes = await hubStub.fetch("https://internal/__yaos/hub/spokes", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ spokeVaultId, deviceName, hubVaultId }),
+	});
+	if (!regRes.ok) {
+		return json({ error: "registration failed" }, 500);
+	}
+
+	// Set the spoke vault's mode to "spoke"
+	void setVaultMode(env, spokeVaultId, "spoke", hubVaultId);
+	// Ensure the hub vault's mode is "hub"
+	void setVaultMode(env, hubVaultId, "hub");
+
+	// Fetch hub's current Y-Doc state for initial seed
+	let initialStateUpdateBase64: string | null = null;
+	try {
+		const hubDocBytes = await fetchVaultDocument(env, hubVaultId);
+		if (hubDocBytes.byteLength > 0) {
+			initialStateUpdateBase64 = btoa(
+				String.fromCharCode(...hubDocBytes),
+			);
+		}
+	} catch (err) {
+		console.warn(`${LOG_PREFIX} hub doc fetch for seed failed:`, err);
+	}
+
+	return json({ ok: true, initialStateUpdate: initialStateUpdateBase64 });
+}
+
 async function createSnapshotFromLiveDoc(
 	env: Env,
 	vaultId: string,
@@ -734,6 +823,69 @@ const worker = {
 			return await stub.fetch(req);
 		}
 
+		// Hub management routes: /hub/{hubVaultId}/...
+		const hubManagementMatch = url.pathname.match(
+			/^\/hub\/([^/]+)(\/spokes(?:\/([^/]+))?|\/invite)?$/,
+		);
+		if (hubManagementMatch) {
+			const token = getHttpAuthToken(req);
+			if (!authState.claimed) {
+				return withCors(json({ error: "unclaimed" }, 503));
+			}
+			if (!(await isAuthorized(authState, token))) {
+				return withCors(json({ error: "unauthorized" }, 401));
+			}
+
+			const hubVaultId = decodeURIComponent(hubManagementMatch[1] ?? "");
+			const subPath = hubManagementMatch[2] ?? "";
+			const subParam = hubManagementMatch[3];
+
+			if (subPath === "" || subPath === "/spokes") {
+				if (req.method === "GET") {
+					const spokes = await listHubSpokes(env, hubVaultId);
+					return withCors(json({ spokes }));
+				}
+				if (req.method === "POST") {
+					// register a spoke
+					return withCors(await handleHubSpokeRegister(env, hubVaultId, req));
+				}
+			}
+
+			if (subPath.startsWith("/spokes/") && subParam) {
+				const spokeVaultId = decodeURIComponent(subParam);
+				if (req.method === "DELETE") {
+					const hubStub = getHubRegistryStub(env, hubVaultId);
+					await hubStub.fetch(
+						`https://internal/__yaos/hub/spokes/${encodeURIComponent(spokeVaultId)}`,
+						{ method: "DELETE" },
+					);
+					// Reset the spoke vault's mode to standalone
+					void setVaultMode(env, spokeVaultId, "standalone");
+					return withCors(json({ ok: true }));
+				}
+			}
+
+			if (subPath === "/invite" && req.method === "GET") {
+				// Return the invite payload for the hub
+				if (authState.mode === "env") {
+					return withCors(json({
+						host: new URL(req.url).origin,
+						hubVaultId,
+						token: authState.envToken,
+					}));
+				}
+				// For claim mode, the token is hashed so we can't return it; caller must use
+				// the token they already have.
+				return withCors(json({
+					host: new URL(req.url).origin,
+					hubVaultId,
+					tokenNote: "Use your existing sync token to register spokes.",
+				}));
+			}
+
+			return withCors(json({ error: "not found" }, 404));
+		}
+
 		const vaultRoute = parseVaultPath(url.pathname);
 		if (!vaultRoute) {
 			return withCors(json({ error: "not found" }, 404));
@@ -883,4 +1035,4 @@ const worker = {
 };
 
 export default worker;
-export { ServerConfig, VaultSyncServer };
+export { ServerConfig, VaultSyncServer, HubRegistry };

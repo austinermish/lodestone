@@ -1586,6 +1586,16 @@ export class VaultSync {
 		);
 	}
 
+	/**
+	 * Apply a raw Yjs update to the local Y.Doc (e.g. hub initial seed or cross-vault sync).
+	 * Uses the given origin so DiskMirror treats it as a remote change.
+	 */
+	applyRemoteUpdate(update: Uint8Array, origin = "remote"): void {
+		this.ydoc.transact(() => {
+			Y.applyUpdate(this.ydoc, update);
+		}, origin);
+	}
+
 	private log(msg: string): void {
 		this._eventRing.push({ ts: new Date().toISOString(), msg });
 		if (this._eventRing.length > 600) {

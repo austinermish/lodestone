@@ -6,6 +6,17 @@ import { randomBase64Url } from "./utils/base64url";
 /** Controls how external disk edits (git, other editors) are imported into CRDT. */
 export type ExternalEditPolicy = "always" | "closed-only" | "never";
 
+/** Hub-and-spoke role for this device. */
+export type SyncMode = "standalone" | "hub" | "spoke";
+
+/** Metadata about a spoke registered with this hub (mirrored from server for UI). */
+export interface SpokeInfo {
+	spokeVaultId: string;
+	deviceName: string;
+	registeredAt: string;
+	lastSeen?: string;
+}
+
 export interface VaultSyncSettings {
 	/** Cloudflare Worker host, e.g. "https://sync.yourdomain.com" */
 	host: string;
@@ -46,6 +57,16 @@ export interface VaultSyncSettings {
 	updateRepoUrl: string;
 	/** Optional default branch for provider-native update links. */
 	updateRepoBranch: string;
+
+	// ── Hub-and-spoke ──────────────────────────────────────────────────────
+	/** Sync topology role for this device. Default "standalone" = current behaviour. */
+	syncMode: SyncMode;
+	/** Spoke only: URL of the hub server. */
+	spokeHubHost: string;
+	/** Spoke only: vault ID of the hub vault. */
+	spokeHubVaultId: string;
+	/** Spoke only: token for spoke registration (same token as hub's sync token). */
+	spokeHubToken: string;
 }
 
 export const DEFAULT_SETTINGS: VaultSyncSettings = {
@@ -67,6 +88,10 @@ export const DEFAULT_SETTINGS: VaultSyncSettings = {
 	showRemoteCursors: true,
 	updateRepoUrl: "",
 	updateRepoBranch: "main",
+	syncMode: "standalone",
+	spokeHubHost: "",
+	spokeHubVaultId: "",
+	spokeHubToken: "",
 };
 
 const CLOUDFLARE_DEPLOY_URL = "https://deploy.workers.cloudflare.com/?url=https://github.com/kavinsood/yaos/tree/main/server";
@@ -311,6 +336,53 @@ function appendFolderPath(current: string, folderPath: string): string {
 	return parts.join(", ");
 }
 
+class SpokeInviteModal extends Modal {
+	constructor(
+		app: App,
+		private readonly hubHost: string,
+		private readonly hubVaultId: string,
+		private readonly hubToken: string,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("h3", { text: "Connect a spoke device" });
+		contentEl.createEl("p", {
+			text: "On the device you want to add as a spoke, open YAOS settings, set Sync Mode to Spoke, and enter these three values:",
+		});
+
+		const fields = [
+			{ label: "Hub server URL", value: this.hubHost },
+			{ label: "Hub vault ID", value: this.hubVaultId },
+			{ label: "Hub sync token", value: this.hubToken },
+		];
+		for (const { label, value } of fields) {
+			const row = contentEl.createDiv({ cls: "yaos-settings-card-row" });
+			row.createSpan({ text: label, cls: "yaos-settings-card-label" });
+			const valueEl = row.createEl("input", { type: "text", cls: "yaos-settings-modal-input" });
+			valueEl.value = value;
+			valueEl.readOnly = true;
+		}
+
+		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+		buttons.createEl("button", { text: "Copy all" }).addEventListener("click", () => {
+			const text = fields.map((f) => `${f.label}: ${f.value}`).join("\n");
+			void navigator.clipboard.writeText(text).then(
+				() => new Notice("Copied."),
+				() => new Notice("Copy failed.", 4000),
+			);
+		});
+		buttons.createEl("button", { text: "Close" }).addEventListener("click", () => this.close());
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
 export class VaultSyncSettingTab extends PluginSettingTab {
 	plugin: VaultCrdtSyncPlugin;
 
@@ -484,6 +556,124 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			}
 		}
 
+		// ── Hub-and-spoke mode ────────────────────────────────────────────────
+		addSectionHeading(containerEl, "Sync topology");
+		new Setting(containerEl)
+			.setName("Sync mode")
+			.setDesc(
+				"Standalone: behaves exactly like before. Hub: this device's vault is shared to spoke devices. Spoke: this device receives content from a hub vault.",
+			)
+			.addDropdown((dd) =>
+				dd
+					.addOption("standalone", "Standalone (default)")
+					.addOption("hub", "Hub — share this vault")
+					.addOption("spoke", "Spoke — connect to a hub")
+					.setValue(this.plugin.settings.syncMode)
+					.onChange(async (value) => {
+						this.plugin.settings.syncMode = value as SyncMode;
+						await this.plugin.saveSettings();
+						this.display();
+					}),
+			);
+
+		if (this.plugin.settings.syncMode === "hub" && !setupIncomplete) {
+			addSectionHeading(containerEl, "Hub — connected spokes");
+
+			void this.plugin.fetchHubSpokes().then((spokes) => {
+				if (spokes.length === 0) {
+					containerEl.createEl("p", {
+						text: "No spokes registered yet. Use the invite button to connect a device.",
+						cls: "setting-item-description",
+					});
+				} else {
+					const spokeCard = containerEl.createDiv({ cls: "yaos-settings-status-card" });
+					for (const spoke of spokes) {
+						addCardRow(
+							spokeCard,
+							spoke.deviceName,
+							`ID: ${shortenMiddle(spoke.spokeVaultId)} · Last seen: ${
+								spoke.lastSeen ? new Date(spoke.lastSeen).toLocaleDateString() : "never"
+							}`,
+						);
+					}
+				}
+			});
+
+			const hubActions = containerEl.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
+			hubActions.createEl("button", { text: "Show invite details" }).addEventListener("click", () => {
+				const { host, vaultId, token } = this.plugin.settings;
+				if (!host || !vaultId || !token) {
+					new Notice("Configure the server URL, token, and vault ID first.", 6000);
+					return;
+				}
+				new SpokeInviteModal(this.app, host, vaultId, token).open();
+			});
+			hubActions.createEl("button", { text: "Refresh spoke list" }).addEventListener("click", () => {
+				this.display();
+			});
+		}
+
+		if (this.plugin.settings.syncMode === "spoke") {
+			addSectionHeading(containerEl, "Spoke — hub connection");
+
+			new Setting(containerEl)
+				.setName("Hub server URL")
+				.setDesc("The URL of the server hosting the hub vault.")
+				.addText((text) =>
+					text
+						.setPlaceholder("https://sync.yourdomain.com")
+						.setValue(this.plugin.settings.spokeHubHost)
+						.onChange(async (value) => {
+							this.plugin.settings.spokeHubHost = value.trim();
+							await this.plugin.saveSettings();
+						}),
+				);
+
+			new Setting(containerEl)
+				.setName("Hub vault ID")
+				.setDesc("The vault ID of the hub vault (given to you by the hub device).")
+				.addText((text) =>
+					text
+						.setPlaceholder("Paste hub vault ID")
+						.setValue(this.plugin.settings.spokeHubVaultId)
+						.onChange(async (value) => {
+							this.plugin.settings.spokeHubVaultId = value.trim();
+							await this.plugin.saveSettings();
+						}),
+				);
+
+			new Setting(containerEl)
+				.setName("Hub sync token")
+				.setDesc("The sync token from the hub server (given to you by the hub admin).")
+				.addText((text) =>
+					text
+						.setPlaceholder("Paste hub token")
+						.setValue(this.plugin.settings.spokeHubToken)
+						.onChange(async (value) => {
+							this.plugin.settings.spokeHubToken = value.trim();
+							await this.plugin.saveSettings();
+						}),
+				);
+
+			const spokeActions = containerEl.createDiv({
+				cls: "modal-button-container yaos-settings-status-actions",
+			});
+			spokeActions
+				.createEl("button", { text: "Register with hub", cls: "mod-cta" })
+				.addEventListener("click", async () => {
+					const { spokeHubHost, spokeHubVaultId, spokeHubToken } =
+						this.plugin.settings;
+					if (!spokeHubHost || !spokeHubVaultId || !spokeHubToken) {
+						new Notice("Fill in all hub connection fields before registering.", 6000);
+						return;
+					}
+					await this.plugin.registerWithHub();
+					new Notice("Successfully registered with hub. Hub content will appear shortly.");
+					this.display();
+				});
+		}
+
+		// ── This device ───────────────────────────────────────────────────────
 		addSectionHeading(containerEl, "This device");
 		new Setting(containerEl)
 			.setName("Device name")

@@ -3038,6 +3038,81 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		].join("\n");
 	}
 
+	// ── Hub-and-spoke ──────────────────────────────────────────────────────
+
+	/**
+	 * Register this device as a spoke with the configured hub.
+	 * Applies the hub's initial Y-Doc state to seed hub content into this vault.
+	 */
+	async registerWithHub(): Promise<void> {
+		const { spokeHubHost, spokeHubVaultId, spokeHubToken, vaultId, deviceName } =
+			this.settings;
+		if (!spokeHubHost || !spokeHubVaultId || !spokeHubToken || !vaultId) {
+			throw new Error("Hub connection details are incomplete.");
+		}
+
+		const url = `${spokeHubHost.replace(/\/$/, "")}/hub/${encodeURIComponent(spokeHubVaultId)}/spokes`;
+		const res = await obsidianRequest({
+			url,
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${spokeHubToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ spokeVaultId: vaultId, deviceName }),
+		});
+
+		if (res.status !== 200) {
+			throw new Error(`Hub registration failed (${res.status})`);
+		}
+
+		const payload = JSON.parse(res.text) as {
+			ok?: boolean;
+			initialStateUpdate?: string | null;
+		};
+
+		if (!payload.ok) {
+			throw new Error("Hub registration returned not-ok.");
+		}
+
+		// Seed hub content into our Y.Doc by applying the initial state update.
+		if (payload.initialStateUpdate && this.vaultSync) {
+			try {
+				const binaryStr = atob(payload.initialStateUpdate);
+				const bytes = new Uint8Array(binaryStr.length);
+				for (let i = 0; i < binaryStr.length; i++) {
+					bytes[i] = binaryStr.charCodeAt(i);
+				}
+				this.vaultSync.applyRemoteUpdate(bytes, "hub-seed");
+				this.log("Hub initial state applied.");
+			} catch (err) {
+				console.warn("[yaos] Failed to apply hub initial state:", err);
+			}
+		}
+	}
+
+	/**
+	 * Fetch the list of spokes registered with this vault's hub registry.
+	 * Only meaningful when `syncMode === "hub"`.
+	 */
+	async fetchHubSpokes(): Promise<import("./settings").SpokeInfo[]> {
+		const { host, vaultId, token } = this.settings;
+		if (!host || !vaultId || !token) return [];
+		try {
+			const url = `${host.replace(/\/$/, "")}/hub/${encodeURIComponent(vaultId)}/spokes`;
+			const res = await obsidianRequest({
+				url,
+				method: "GET",
+				headers: { Authorization: `Bearer ${token}` },
+			});
+			if (res.status !== 200) return [];
+			const payload = JSON.parse(res.text) as { spokes?: import("./settings").SpokeInfo[] };
+			return Array.isArray(payload.spokes) ? payload.spokes : [];
+		} catch {
+			return [];
+		}
+	}
+
 	private createBlobSyncManager(): BlobSyncManager | null {
 		if (!this.vaultSync) return null;
 		if (!this.settings.host || !this.settings.token) return null;

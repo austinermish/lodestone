@@ -10,9 +10,17 @@ class_name = "VaultSyncServer"
 name = "YAOS_CONFIG"
 class_name = "ServerConfig"
 
+[[durable_objects.bindings]]
+name = "YAOS_HUB"
+class_name = "HubRegistry"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["VaultSyncServer", "ServerConfig"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["HubRegistry"]
 
 [observability.logs]
 enabled = true
