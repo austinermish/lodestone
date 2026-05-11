@@ -46,11 +46,38 @@ npm typecheck     # Type-check only
 
 ### Versioning
 
+Do **not** use `npm version` — it auto-commits and is blocked by the harness. Do it manually with git:
+
 ```bash
-npm version <patch|minor|major>   # Bumps manifest.json, versions.json, stages both
+# 1. Edit the version string in three files:
+#    package.json        → "version": "X.Y.Z"
+#    manifest.json       → "version": "X.Y.Z"
+#    versions.json       → add "X.Y.Z": "1.5.0"   (append to end of object)
+
+# 2. Commit the version bump
+git add package.json manifest.json versions.json
+git commit -m "X.Y.Z"
+
+# 3. Push
+git push origin main
 ```
 
-Release artifacts attached to GitHub release: `main.js`, `manifest.json`, `styles.css`.
+### Creating a GitHub Release
+
+After pushing, build the artifacts and create the release with `gh`:
+
+```bash
+# Build production artifacts
+npm run build
+
+# Create GitHub release and attach artifacts
+gh release create X.Y.Z \
+  --title "X.Y.Z" \
+  --notes "Brief description of changes." \
+  main.js manifest.json styles.css
+```
+
+Release artifacts: `main.js`, `manifest.json`, `styles.css`.
 
 ## Architecture
 
@@ -78,6 +105,8 @@ One `Y.Doc` per vault ("monolithic vault CRDT"). All file contents are sub-docum
 - R2 used for blob storage and snapshot archives
 - Auth: setup token (one-time claim via browser UI) or `SYNC_TOKEN` env var
 - `setupPage.ts` renders the browser claim UI; deep-links back via `obsidian://` protocol
+- `hubRegistry.ts` (`HubRegistry` DO, `YAOS_HUB` binding) — stores spoke registrations per hub vault
+- `syncBridge.ts` — DO-to-DO propagation functions for hub→spoke and spoke→hub cross-vault sync
 
 ### Data flow
 
