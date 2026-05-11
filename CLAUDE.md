@@ -64,18 +64,26 @@ git push origin main
 
 ### Creating a GitHub Release
 
-After pushing, build the artifacts and create the release with `gh`:
+After pushing, build the artifacts, write release notes to a temp file, create the release, then delete the temp file:
 
 ```bash
 # Build production artifacts
 npm run build
 
-# Create GitHub release and attach artifacts
+# Write release notes to temp file, create release, then clean up
+cat > /tmp/yaos-X.Y.Z-notes.md << 'EOF'
+<release notes here>
+EOF
+
 gh release create X.Y.Z \
-  --title "X.Y.Z" \
-  --notes "Brief description of changes." \
+  --title "X.Y.Z — <short description>" \
+  --notes-file /tmp/yaos-X.Y.Z-notes.md \
   main.js manifest.json styles.css
+
+sudo rm /tmp/yaos-X.Y.Z-notes.md
 ```
+
+Note: `rm` on `/tmp` files requires `sudo` on this machine.
 
 Release artifacts: `main.js`, `manifest.json`, `styles.css`.
 
