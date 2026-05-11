@@ -83,9 +83,20 @@ gh release create X.Y.Z \
 sudo rm /tmp/yaos-X.Y.Z-notes.md
 ```
 
-Note: `rm` on `/tmp` files requires `sudo` on this machine.
+Note: plain `rm` works on `/tmp` files — do **not** use `sudo rm`.
 
 Release artifacts: `main.js`, `manifest.json`, `styles.css`.
+
+### Release after every commit
+
+**After every feature or bugfix commit, bump the version and create a GitHub release** so the changes can be tested in Obsidian immediately:
+
+1. Bump patch (X.Y.**Z+1**) for bugfixes, minor (X.**Y+1**.0) for new features
+2. Edit `package.json`, `manifest.json`, `versions.json`
+3. `git add package.json manifest.json versions.json && git commit -m "X.Y.Z"`
+4. `git push origin main`
+5. `npm run build`
+6. Create the release (see template above)
 
 ## Architecture
 
