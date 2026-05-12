@@ -646,6 +646,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				try {
 					await this.plugin.registerWithHub();
 					new Notice("Re-registered with hub.");
+					this.plugin.maybeStartSync();
 				} catch (err) {
 					new Notice(`Re-registration failed: ${err instanceof Error ? err.message : String(err)}`, 8000);
 				}
@@ -710,11 +711,16 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						return;
 					}
 					try {
+						if (!this.plugin.settings.host) {
+							this.plugin.settings.host = spokeHubHost;
+							this.plugin.settings.token = spokeHubToken;
+						}
 						await this.plugin.registerWithHub();
 						this.plugin.settings.syncMode = "spoke";
 						await this.plugin.saveSettings();
 						new Notice("Successfully registered with hub. Hub content will appear shortly.");
 						this.display();
+						this.plugin.maybeStartSync();
 					} catch (err) {
 						new Notice(`Registration failed: ${err instanceof Error ? err.message : String(err)}`, 8000);
 					}
@@ -815,6 +821,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		if (this.plugin.settings.syncMode !== "spoke") {
 		addSectionHeading(containerEl, "Sync filters");
 		new Setting(containerEl)
 			.setName("Folders to sync")
@@ -890,6 +897,8 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						}
 					}),
 		);
+
+		} // end syncMode !== "spoke" (Sync filters)
 
 		if (!setupIncomplete && this.plugin.settings.syncMode !== "spoke") {
 			addSectionHeading(containerEl, "Attachments");

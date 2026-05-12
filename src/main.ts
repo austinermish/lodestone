@@ -325,6 +325,12 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	}
 
 	/** Called by the settings tab whenever a setting changes that affects derived state. */
+	maybeStartSync(): void {
+		if (!this.vaultSync) {
+			void this.initSync();
+		}
+	}
+
 	onSettingsChanged(): void {
 		this.excludePatterns = parseExcludePatterns(this.settings.excludePatterns);
 		this.includePaths = parseIncludePaths(this.settings.includePaths);
@@ -3812,6 +3818,11 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		this.settings.spokeHubHost = host;
 		this.settings.spokeHubVaultId = hubVaultId;
 		this.settings.spokeHubToken = token;
+		// Use the hub's server as the spoke's own sync server if not already configured.
+		if (!this.settings.host) {
+			this.settings.host = host;
+			this.settings.token = token;
+		}
 		await this.saveSettings();
 
 		try {
@@ -3826,6 +3837,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			);
 		}
 		this.settingTab?.display();
+		if (!this.vaultSync) {
+			void this.initSync();
+		}
 	}
 
 	private async handleSetupLink(params: Record<string, string>): Promise<void> {

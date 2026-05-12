@@ -582,7 +582,8 @@ async function handleHubSpokeRegister(
 	// Ensure the hub vault's mode is "hub"
 	void setVaultMode(env, hubVaultId, "hub");
 
-	// Fetch hub's current Y-Doc state for initial seed
+	// Fetch hub's current Y-Doc state and seed the spoke's DO immediately,
+	// so the spoke client receives content as soon as it connects via WebSocket.
 	let initialStateUpdateBase64: string | null = null;
 	try {
 		const hubDocBytes = await fetchVaultDocument(env, hubVaultId);
@@ -590,9 +591,16 @@ async function handleHubSpokeRegister(
 			initialStateUpdateBase64 = btoa(
 				String.fromCharCode(...hubDocBytes),
 			);
+			// Push hub state to spoke's DO so it's ready before the client connects.
+			const spokeStub = await getServerByName(env.YAOS_SYNC, spokeVaultId);
+			await spokeStub.fetch("https://internal/__yaos/apply-hub-update", {
+				method: "POST",
+				headers: { "Content-Type": "application/octet-stream" },
+				body: hubDocBytes,
+			});
 		}
 	} catch (err) {
-		console.warn(`${LOG_PREFIX} hub doc fetch for seed failed:`, err);
+		console.warn(`${LOG_PREFIX} hub doc fetch/seed for spoke failed:`, err);
 	}
 
 	return json({ ok: true, initialStateUpdate: initialStateUpdateBase64 });
