@@ -20,7 +20,7 @@ new_sqlite_classes = ["VaultSyncServer", "ServerConfig"]
 
 [[migrations]]
 tag = "v2"
-new_classes = ["HubRegistry"]
+new_sqlite_classes = ["HubRegistry"]
 
 [observability.logs]
 enabled = true
