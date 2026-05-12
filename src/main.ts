@@ -300,6 +300,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	private legacyServerDetected = false;
 	private legacyServerNoticeShown = false;
 	private commandsRegistered = false;
+	private vaultEventsRegistered = false;
 	private idbDegradedHandled = false;
 	private lastMetadataRaceRejectionAt = 0;
 	private frontmatterGuardNoticeFingerprints = new Map<string, string>();
@@ -329,6 +330,15 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		if (!this.vaultSync) {
 			void this.initSync();
 		}
+	}
+
+	/**
+	 * Tear down any existing sync connection and start fresh.
+	 * Used after spoke registration to ensure the new hub host/token take effect.
+	 */
+	restartSync(): void {
+		this.teardownSync();
+		void this.initSync();
 	}
 
 	onSettingsChanged(): void {
@@ -547,7 +557,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			});
 
 			// 6. Vault events (gated by this.reconciled)
-			this.registerVaultEvents();
+			if (!this.vaultEventsRegistered) {
+				this.registerVaultEvents();
+				this.vaultEventsRegistered = true;
+			}
 
 			// 7. Commands
 			if (!this.commandsRegistered) {
@@ -3818,11 +3831,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		this.settings.spokeHubHost = host;
 		this.settings.spokeHubVaultId = hubVaultId;
 		this.settings.spokeHubToken = token;
-		// Use the hub's server as the spoke's own sync server if not already configured.
-		if (!this.settings.host) {
-			this.settings.host = host;
-			this.settings.token = token;
-		}
+		// Spoke vaults must connect to the hub's Cloudflare worker — always apply hub's host+token.
+		this.settings.host = host;
+		this.settings.token = token;
 		await this.saveSettings();
 
 		try {
@@ -3837,9 +3848,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			);
 		}
 		this.settingTab?.display();
-		if (!this.vaultSync) {
-			void this.initSync();
-		}
+		// Always restart sync so the updated host+token take effect.
+		this.teardownSync();
+		void this.initSync();
 	}
 
 	private async handleSetupLink(params: Record<string, string>): Promise<void> {

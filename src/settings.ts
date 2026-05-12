@@ -711,16 +711,15 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						return;
 					}
 					try {
-						if (!this.plugin.settings.host) {
-							this.plugin.settings.host = spokeHubHost;
-							this.plugin.settings.token = spokeHubToken;
-						}
+						// Spoke vaults must connect to the hub's worker — always apply hub's host+token.
+						this.plugin.settings.host = spokeHubHost;
+						this.plugin.settings.token = spokeHubToken;
 						await this.plugin.registerWithHub();
 						this.plugin.settings.syncMode = "spoke";
 						await this.plugin.saveSettings();
 						new Notice("Successfully registered with hub. Hub content will appear shortly.");
 						this.display();
-						this.plugin.maybeStartSync();
+						this.plugin.restartSync();
 					} catch (err) {
 						new Notice(`Registration failed: ${err instanceof Error ? err.message : String(err)}`, 8000);
 					}

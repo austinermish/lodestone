@@ -108,8 +108,12 @@ export class VaultSyncServer extends YServer {
 
 	async fetch(request: Request): Promise<Response> {
 		this.captureRoomIdHint(request);
+		return super.fetch(request);
+	}
 
+	async onRequest(request: Request): Promise<Response> {
 		const url = new URL(request.url);
+
 		if (request.method === "GET" && url.pathname === "/__yaos/meta") {
 			return json({
 				roomId: this.getRoomId(),
@@ -118,7 +122,6 @@ export class VaultSyncServer extends YServer {
 		}
 
 		if (request.method === "GET" && url.pathname === "/__yaos/document") {
-			await this.ensureDocumentLoaded();
 			return new Response(Y.encodeStateAsUpdate(this.document), {
 				headers: {
 					"Content-Type": "application/octet-stream",
@@ -179,7 +182,6 @@ export class VaultSyncServer extends YServer {
 
 		// Spoke → Hub: apply incoming spoke delta filtered to hub-known paths.
 		if (request.method === "POST" && url.pathname === "/__yaos/apply-spoke-update") {
-			await this.ensureDocumentLoaded();
 			const originVaultId = request.headers.get("X-Yaos-Origin") ?? "unknown";
 			const updateBytes = new Uint8Array(await request.arrayBuffer());
 			if (updateBytes.byteLength === 0) {
@@ -237,7 +239,6 @@ export class VaultSyncServer extends YServer {
 
 		// Hub → Spoke: apply incoming hub delta to this spoke's Y.Doc.
 		if (request.method === "POST" && url.pathname === "/__yaos/apply-hub-update") {
-			await this.ensureDocumentLoaded();
 			const updateBytes = new Uint8Array(await request.arrayBuffer());
 			if (updateBytes.byteLength === 0) {
 				return json({ ok: true, applied: false, reason: "empty" });
@@ -263,7 +264,6 @@ export class VaultSyncServer extends YServer {
 		}
 
 		if (request.method === "POST" && url.pathname === "/__yaos/snapshot-maybe") {
-			await this.ensureDocumentLoaded();
 			let body: { device?: string } = {};
 			try {
 				body = await request.json();
@@ -273,8 +273,7 @@ export class VaultSyncServer extends YServer {
 			return json(await this.createDailySnapshotMaybe(body.device));
 		}
 
-		await this.ensureDocumentLoaded();
-		return super.fetch(request);
+		return new Response("Not found", { status: 404 });
 	}
 
 	private async ensureDocumentLoaded(): Promise<void> {
