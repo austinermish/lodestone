@@ -329,6 +329,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		this.excludePatterns = parseExcludePatterns(this.settings.excludePatterns);
 		this.includePaths = parseIncludePaths(this.settings.includePaths);
 		this.maxFileSize = this.settings.maxFileSizeKB * 1024;
+		if (this.vaultSync && this.diskMirror) {
+			void this.runReconciliation("authoritative");
+		}
 	}
 
 	async onload() {
@@ -3816,13 +3819,13 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			this.settings.syncMode = "spoke";
 			await this.saveSettings();
 			new Notice("Connected to hub vault. Hub content will appear shortly.", 6000);
-			this.settingTab?.display();
 		} catch (err) {
 			new Notice(
 				`Hub registration failed: ${err instanceof Error ? err.message : String(err)}. Make sure the hub server is deployed and accessible.`,
 				10000,
 			);
 		}
+		this.settingTab?.display();
 	}
 
 	private async handleSetupLink(params: Record<string, string>): Promise<void> {

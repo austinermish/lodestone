@@ -612,7 +612,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				new SpokeInviteModal(this.app, host, vaultId, token).open();
 			});
 			hubActions.createEl("button", { text: "Refresh" }).addEventListener("click", () => {
-				this.display();
+				void this.plugin.fetchHubSpokes().then(renderSpokes);
 			});
 		}
 
@@ -891,7 +891,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					}),
 		);
 
-		if (!setupIncomplete) {
+		if (!setupIncomplete && this.plugin.settings.syncMode !== "spoke") {
 			addSectionHeading(containerEl, "Attachments");
 
 			new Setting(containerEl)
