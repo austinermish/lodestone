@@ -182,6 +182,7 @@ function readPersistedUpdateManifestCache(value: unknown): PersistedUpdateManife
 export default class VaultCrdtSyncPlugin extends Plugin {
 	settings: VaultSyncSettings = DEFAULT_SETTINGS;
 
+	private settingTab: VaultSyncSettingTab | null = null;
 	private vaultSync: VaultSync | null = null;
 	private editorBindings: EditorBindingManager | null = null;
 	private diskMirror: DiskMirror | null = null;
@@ -364,7 +365,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			this.log(`Generated vault ID: ${this.settings.vaultId}`);
 		}
 
-		this.addSettingTab(new VaultSyncSettingTab(this.app, this));
+		this.settingTab = new VaultSyncSettingTab(this.app, this);
+		this.addSettingTab(this.settingTab);
 
 		this.statusBarEl = this.addStatusBarItem();
 		this.updateStatusBar("disconnected");
@@ -3814,6 +3816,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			this.settings.syncMode = "spoke";
 			await this.saveSettings();
 			new Notice("Connected to hub vault. Hub content will appear shortly.", 6000);
+			this.settingTab?.display();
 		} catch (err) {
 			new Notice(
 				`Hub registration failed: ${err instanceof Error ? err.message : String(err)}. Make sure the hub server is deployed and accessible.`,

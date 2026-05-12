@@ -466,7 +466,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 		const syncStatus = this.plugin.getSettingsStatusSummary();
 
 		// ── Hub (collapsible) ────────────────────────────────────────────────
-		const hubDetails = createDetailsSection(containerEl, "Hub", false);
+		const hubDetails = createDetailsSection(containerEl, "Hub", !setupIncomplete);
 		const hubBody = hubDetails.createDiv({ cls: "yaos-settings-details-body" });
 
 		if (setupIncomplete) {
@@ -635,7 +635,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				cls: "yaos-settings-status-subtitle",
 			});
 			spokeLine.createSpan({
-				text: "connected",
+				text: "Connected",
 				cls: "yaos-settings-status-badge is-connected",
 			});
 
@@ -891,9 +891,9 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					}),
 		);
 
-		addSectionHeading(containerEl, "Attachments");
+		if (!setupIncomplete) {
+			addSectionHeading(containerEl, "Attachments");
 
-		if (this.plugin.settings.host) {
 			new Setting(containerEl)
 				.setName("Attachment storage")
 				.setDesc(
@@ -911,69 +911,69 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						this.display();
 					}),
 			);
-		}
 
-		if (this.plugin.settings.host && !attachmentsAvailable) {
-			const noR2Note = containerEl.createDiv({ cls: "yaos-settings-attachment-callout" });
-			const noR2Text = noR2Note.createEl("p", { cls: "yaos-settings-status-subtitle" });
-			noR2Text.appendText("Attachment sync requires a Cloudflare R2 bucket — ");
-			const setupLink = noR2Text.createEl("a", {
-				text: "watch the 1-minute setup guide",
-				href: "https://youtu.be/Z7xCMEYfdFM",
-			});
-			setupLink.setAttr("target", "_blank");
-			noR2Text.appendText(".");
-		}
+			if (!attachmentsAvailable) {
+				const noR2Note = containerEl.createDiv({ cls: "yaos-settings-attachment-callout" });
+				const noR2Text = noR2Note.createEl("p", { cls: "yaos-settings-status-subtitle" });
+				noR2Text.appendText("Attachment sync requires a Cloudflare R2 bucket — ");
+				const setupLink = noR2Text.createEl("a", {
+					text: "watch the 1-minute setup guide",
+					href: "https://youtu.be/Z7xCMEYfdFM",
+				});
+				setupLink.setAttr("target", "_blank");
+				noR2Text.appendText(".");
+			}
 
-		if (attachmentsAvailable || !this.plugin.settings.host) {
-			new Setting(containerEl)
-				.setName("Sync attachments")
-				.setDesc(
-					"Sync images, PDF files, and other attachments through object storage. This is enabled by default when the server supports it.",
-				)
-				.addToggle((toggle) =>
-					toggle
-						.setValue(this.plugin.settings.enableAttachmentSync)
-						.onChange(async (value) => {
-							this.plugin.settings.enableAttachmentSync = value;
-							this.plugin.settings.attachmentSyncExplicitlyConfigured = true;
-							await this.plugin.saveSettings();
-							await this.plugin.refreshAttachmentSyncRuntime("attachment-toggle");
-							this.display();
-						}),
-				);
-		}
-
-		if ((attachmentsAvailable || !this.plugin.settings.host) && this.plugin.settings.enableAttachmentSync) {
-			new Setting(containerEl)
-				.setName("Max attachment size (KB)")
-				.setDesc("Attachments larger than this are skipped.")
-				.addText((text) =>
-					text
-						.setPlaceholder("10240")
-						.setValue(String(this.plugin.settings.maxAttachmentSizeKB))
-						.onChange(async (value) => {
-							const n = parseInt(value, 10);
-							if (!isNaN(n) && n > 0) {
-								this.plugin.settings.maxAttachmentSizeKB = n;
+			if (attachmentsAvailable) {
+				new Setting(containerEl)
+					.setName("Sync attachments")
+					.setDesc(
+						"Sync images, PDF files, and other attachments through object storage. This is enabled by default when the server supports it.",
+					)
+					.addToggle((toggle) =>
+						toggle
+							.setValue(this.plugin.settings.enableAttachmentSync)
+							.onChange(async (value) => {
+								this.plugin.settings.enableAttachmentSync = value;
+								this.plugin.settings.attachmentSyncExplicitlyConfigured = true;
 								await this.plugin.saveSettings();
-							}
-						}),
-				);
+								await this.plugin.refreshAttachmentSyncRuntime("attachment-toggle");
+								this.display();
+							}),
+					);
+			}
 
-			new Setting(containerEl)
-				.setName("Upload/download slots")
-				.setDesc("Simultaneous transfers. Default 1 is safest on mobile.")
-				.addSlider((slider) =>
-					slider
-						.setLimits(1, 5, 1)
-						.setValue(this.plugin.settings.attachmentConcurrency)
-						.setDynamicTooltip()
-						.onChange(async (value) => {
-							this.plugin.settings.attachmentConcurrency = value;
-							await this.plugin.saveSettings();
-						}),
-				);
+			if (attachmentsAvailable && this.plugin.settings.enableAttachmentSync) {
+				new Setting(containerEl)
+					.setName("Max attachment size (KB)")
+					.setDesc("Attachments larger than this are skipped.")
+					.addText((text) =>
+						text
+							.setPlaceholder("10240")
+							.setValue(String(this.plugin.settings.maxAttachmentSizeKB))
+							.onChange(async (value) => {
+								const n = parseInt(value, 10);
+								if (!isNaN(n) && n > 0) {
+									this.plugin.settings.maxAttachmentSizeKB = n;
+									await this.plugin.saveSettings();
+								}
+							}),
+					);
+
+				new Setting(containerEl)
+					.setName("Upload/download slots")
+					.setDesc("Simultaneous transfers. Default 1 is safest on mobile.")
+					.addSlider((slider) =>
+						slider
+							.setLimits(1, 5, 1)
+							.setValue(this.plugin.settings.attachmentConcurrency)
+							.setDynamicTooltip()
+							.onChange(async (value) => {
+								this.plugin.settings.attachmentConcurrency = value;
+								await this.plugin.saveSettings();
+							}),
+					);
+			}
 		}
 
 		const manualDetails = createDetailsSection(containerEl, "Manual connection", setupIncomplete);
