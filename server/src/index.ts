@@ -629,7 +629,12 @@ const worker = {
 		const url = new URL(req.url);
 		if (
 			req.method === "OPTIONS"
-			&& (url.pathname.startsWith("/vault/") || url.pathname.startsWith("/api/"))
+			&& (
+				url.pathname.startsWith("/vault/")
+				|| url.pathname.startsWith("/api/")
+				|| url.pathname.startsWith("/hub/")
+				|| url.pathname === "/claim"
+			)
 		) {
 			return corsPreflight();
 		}

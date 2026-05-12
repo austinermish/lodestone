@@ -337,6 +337,8 @@ function appendFolderPath(current: string, folderPath: string): string {
 }
 
 class SpokeInviteModal extends Modal {
+	private qrCanvas: HTMLCanvasElement | null = null;
+
 	constructor(
 		app: App,
 		private readonly hubHost: string,
@@ -349,10 +351,52 @@ class SpokeInviteModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.createEl("h3", { text: "Connect a spoke device" });
+		contentEl.addClass("yaos-pair-device-modal");
+
+		const inviteUrl = `obsidian://yaos?action=spoke&host=${encodeURIComponent(this.hubHost)}&hubVaultId=${encodeURIComponent(this.hubVaultId)}&token=${encodeURIComponent(this.hubToken)}`;
+
+		contentEl.createEl("h3", { text: "Connect a spoke vault" });
 		contentEl.createEl("p", {
-			text: "On the device you want to add as a spoke, open YAOS settings, set Sync Mode to Spoke, and enter these three values:",
+			text: "On the vault you want to connect as a spoke, open this link. YAOS will fill in the connection details and register automatically.",
+			cls: "yaos-modal-copy",
 		});
+
+		const qrWrap = contentEl.createDiv({ cls: "yaos-pair-device-qr-wrap" });
+		const loadingEl = qrWrap.createEl("div", {
+			text: "Generating invite code...",
+			cls: "yaos-pair-device-loading",
+		});
+		this.qrCanvas = qrWrap.createEl("canvas", { cls: "yaos-pair-device-qr-canvas" });
+		this.qrCanvas.hidden = true;
+
+		void QRCode.toCanvas(this.qrCanvas, inviteUrl, {
+			width: 220,
+			margin: 1,
+			errorCorrectionLevel: "M",
+		}).then(() => {
+			loadingEl.remove();
+			if (this.qrCanvas) {
+				this.qrCanvas.hidden = false;
+				this.qrCanvas.setAttr("aria-label", "Spoke invite code");
+			}
+		}).catch(() => {
+			loadingEl.setText("Could not generate a QR code.");
+			if (this.qrCanvas) {
+				this.qrCanvas.remove();
+				this.qrCanvas = null;
+			}
+		});
+
+		const primaryButtons = contentEl.createDiv({ cls: "modal-button-container" });
+		primaryButtons.createEl("button", { text: "Copy invite link" }).addEventListener("click", () => {
+			void navigator.clipboard.writeText(inviteUrl).then(
+				() => new Notice("Invite link copied."),
+				() => new Notice("Copy failed.", 4000),
+			);
+		});
+
+		const manualDetails = createDetailsSection(contentEl, "Manual setup (copy these to the spoke vault)", false);
+		const manualBody = manualDetails.createDiv({ cls: "yaos-settings-details-body" });
 
 		const fields = [
 			{ label: "Hub server URL", value: this.hubHost },
@@ -360,26 +404,29 @@ class SpokeInviteModal extends Modal {
 			{ label: "Hub sync token", value: this.hubToken },
 		];
 		for (const { label, value } of fields) {
-			const row = contentEl.createDiv({ cls: "yaos-settings-card-row" });
+			const row = manualBody.createDiv({ cls: "yaos-settings-card-row" });
 			row.createSpan({ text: label, cls: "yaos-settings-card-label" });
 			const valueEl = row.createEl("input", { type: "text", cls: "yaos-settings-modal-input" });
 			valueEl.value = value;
 			valueEl.readOnly = true;
 		}
-
-		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
-		buttons.createEl("button", { text: "Copy all" }).addEventListener("click", () => {
+		const manualButtons = manualBody.createDiv({ cls: "modal-button-container" });
+		manualButtons.createEl("button", { text: "Copy all" }).addEventListener("click", () => {
 			const text = fields.map((f) => `${f.label}: ${f.value}`).join("\n");
 			void navigator.clipboard.writeText(text).then(
 				() => new Notice("Copied."),
 				() => new Notice("Copy failed.", 4000),
 			);
 		});
-		buttons.createEl("button", { text: "Close" }).addEventListener("click", () => this.close());
+
+		contentEl.createDiv({ cls: "modal-button-container" })
+			.createEl("button", { text: "Close" })
+			.addEventListener("click", () => this.close());
 	}
 
 	onClose(): void {
 		this.contentEl.empty();
+		this.qrCanvas = null;
 	}
 }
 

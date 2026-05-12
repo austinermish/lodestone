@@ -3759,7 +3759,40 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		});
 	}
 
-		private async handleSetupLink(params: Record<string, string>): Promise<void> {
+		private async handleSpokeSetupLink(params: Record<string, string>): Promise<void> {
+		const host = typeof params.host === "string" ? params.host.trim() : "";
+		const hubVaultId = typeof params.hubVaultId === "string" ? params.hubVaultId.trim() : "";
+		const token = typeof params.token === "string" ? params.token.trim() : "";
+
+		if (!host || !hubVaultId || !token) {
+			new Notice("Spoke invite link is incomplete — missing host, hub vault ID, or token.", 7000);
+			return;
+		}
+
+		this.settings.spokeHubHost = host;
+		this.settings.spokeHubVaultId = hubVaultId;
+		this.settings.spokeHubToken = token;
+		await this.saveSettings();
+
+		try {
+			await this.registerWithHub();
+			this.settings.syncMode = "spoke";
+			await this.saveSettings();
+			new Notice("Connected to hub vault. Hub content will appear shortly.", 6000);
+		} catch (err) {
+			new Notice(
+				`Hub registration failed: ${err instanceof Error ? err.message : String(err)}. Make sure the hub server is deployed and accessible.`,
+				10000,
+			);
+		}
+	}
+
+	private async handleSetupLink(params: Record<string, string>): Promise<void> {
+		if ((params.action ?? "setup") === "spoke") {
+			await this.handleSpokeSetupLink(params);
+			return;
+		}
+
 			const host = typeof params.host === "string" ? params.host.trim() : "";
 			const token = typeof params.token === "string" ? params.token.trim() : "";
 			const incomingVaultId = typeof params.vaultId === "string" ? params.vaultId.trim() : "";
