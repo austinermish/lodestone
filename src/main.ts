@@ -3788,7 +3788,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	}
 
 	private async handleSetupLink(params: Record<string, string>): Promise<void> {
-		if ((params.action ?? "setup") === "spoke") {
+		if (typeof params.hubVaultId === "string" && params.hubVaultId.trim()) {
 			await this.handleSpokeSetupLink(params);
 			return;
 		}

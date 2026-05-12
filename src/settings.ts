@@ -447,8 +447,12 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 		const setupIncomplete = !this.plugin.settings.host || !this.plugin.settings.token;
 		const syncStatus = this.plugin.getSettingsStatusSummary();
 
+		// ── Hub (collapsible) ────────────────────────────────────────────────
+		const hubDetails = createDetailsSection(containerEl, "Hub", true);
+		const hubBody = hubDetails.createDiv({ cls: "yaos-settings-details-body" });
+
 		if (setupIncomplete) {
-			const callout = containerEl.createDiv({ cls: "callout yaos-settings-setup-callout" });
+			const callout = hubBody.createDiv({ cls: "callout yaos-settings-setup-callout" });
 			callout.setAttr("data-callout", "warning");
 
 			const calloutTitle = callout.createDiv({ cls: "callout-title" });
@@ -475,13 +479,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 							window.open(CLOUDFLARE_DEPLOY_URL, "_blank", "noopener");
 						}),
 				);
-		}
-
-		// ── Hub (collapsible) ────────────────────────────────────────────────
-		const hubDetails = createDetailsSection(containerEl, "Hub", !setupIncomplete);
-		const hubBody = hubDetails.createDiv({ cls: "yaos-settings-details-body" });
-
-		if (!setupIncomplete) {
+		} else {
 			const card = hubBody.createDiv({ cls: "yaos-settings-status-card" });
 
 			const statusLine = card.createDiv({ cls: "yaos-settings-status-line" });
@@ -569,11 +567,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			});
 			hubActions.createEl("button", { text: "Refresh" }).addEventListener("click", () => {
 				this.display();
-			});
-		} else {
-			hubBody.createEl("p", {
-				text: "Set up your server below to get started.",
-				cls: "setting-item-description",
 			});
 		}
 
@@ -983,7 +976,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						.onChange(async (value) => {
 							this.plugin.settings.vaultId = value.trim();
 						await this.plugin.saveSettings();
-						this.display();
 					}),
 			);
 
@@ -997,7 +989,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						.onChange(async (value) => {
 							this.plugin.settings.updateRepoUrl = value.trim();
 							await this.plugin.saveSettings();
-							this.display();
 						}),
 				);
 
