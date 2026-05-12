@@ -3091,6 +3091,41 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		}
 	}
 
+	/** Deregister this vault from its hub, then clear spoke settings locally. Best-effort server call. */
+	async disconnectFromHub(): Promise<void> {
+		const { spokeHubHost, spokeHubVaultId, spokeHubToken, vaultId } = this.settings;
+		if (spokeHubHost && spokeHubVaultId && spokeHubToken && vaultId) {
+			try {
+				await obsidianRequest({
+					url: `${spokeHubHost.replace(/\/$/, "")}/hub/${encodeURIComponent(spokeHubVaultId)}/spokes/${encodeURIComponent(vaultId)}`,
+					method: "DELETE",
+					headers: { Authorization: `Bearer ${spokeHubToken}` },
+				});
+			} catch (err) {
+				console.warn("[yaos] spoke deregister failed (clearing local settings anyway):", err);
+			}
+		}
+		this.settings.spokeHubHost = "";
+		this.settings.spokeHubVaultId = "";
+		this.settings.spokeHubToken = "";
+		this.settings.syncMode = "standalone";
+		await this.saveSettings();
+	}
+
+	/** Remove a specific spoke vault from this hub's registry. Throws on server error. */
+	async removeSpokeFromHub(spokeVaultId: string): Promise<void> {
+		const { host, vaultId, token } = this.settings;
+		if (!host || !vaultId || !token) throw new Error("Hub connection not configured.");
+		const res = await obsidianRequest({
+			url: `${host.replace(/\/$/, "")}/hub/${encodeURIComponent(vaultId)}/spokes/${encodeURIComponent(spokeVaultId)}`,
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${token}` },
+		});
+		if (res.status !== 200) {
+			throw new Error(`Server returned ${res.status}`);
+		}
+	}
+
 	/**
 	 * Fetch the list of spokes registered with this vault's hub registry.
 	 * Only meaningful when `syncMode === "hub"`.

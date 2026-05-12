@@ -149,6 +149,24 @@ function statusClass(state: string): string {
 	}
 }
 
+function confirmAction(app: App, title: string, message: string, onConfirm: () => void | Promise<void>): void {
+	class InlineConfirm extends Modal {
+		onOpen() {
+			this.contentEl.createEl("h3", { text: title });
+			this.contentEl.createEl("p", { text: message });
+			const row = this.contentEl.createDiv({ cls: "modal-button-container" });
+			row.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+			const confirmBtn = row.createEl("button", { text: "Confirm", cls: "mod-warning" });
+			confirmBtn.addEventListener("click", () => {
+				this.close();
+				void onConfirm();
+			});
+		}
+		onClose() { this.contentEl.empty(); }
+	}
+	new InlineConfirm(app).open();
+}
+
 function createDetailsSection(containerEl: HTMLElement, title: string, open = false): HTMLDetailsElement {
 	const detailsEl = containerEl.createEl("details", { cls: "yaos-settings-details" });
 	detailsEl.open = open;
@@ -448,7 +466,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 		const syncStatus = this.plugin.getSettingsStatusSummary();
 
 		// ── Hub (collapsible) ────────────────────────────────────────────────
-		const hubDetails = createDetailsSection(containerEl, "Hub", true);
+		const hubDetails = createDetailsSection(containerEl, "Hub", false);
 		const hubBody = hubDetails.createDiv({ cls: "yaos-settings-details-body" });
 
 		if (setupIncomplete) {
@@ -515,15 +533,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			}
 
 			const actionRow = card.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
-			actionRow.createEl("button", { text: "Pair another device" }).addEventListener("click", () => {
-				const deepLink = this.plugin.buildSetupDeepLink();
-				const mobileUrl = this.plugin.buildMobileSetupUrl();
-				if (!deepLink || !mobileUrl) {
-					new Notice("Configure the server URL, sync token, and vault ID before pairing.", 7000);
-					return;
-				}
-				new PairDeviceModal(this.app, deepLink, mobileUrl).open();
-			});
 			actionRow.createEl("button", { text: "Backup connection details" }).addEventListener("click", () => {
 				const recoveryKit = this.plugin.buildRecoveryKitText();
 				if (!recoveryKit) {
@@ -532,11 +541,26 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				}
 				new RecoveryKitModal(this.app, recoveryKit).open();
 			});
+			actionRow.createEl("button", { text: "Reset connection" }).addEventListener("click", () => {
+				confirmAction(
+					this.app,
+					"Reset hub connection",
+					"This clears your server URL, token, and vault ID from this device. Your server data is not deleted. You can reclaim the server to reconnect.",
+					async () => {
+						this.plugin.settings.host = "";
+						this.plugin.settings.token = "";
+						this.plugin.settings.vaultId = "";
+						this.plugin.settings.syncMode = "standalone";
+						await this.plugin.saveSettings();
+						this.display();
+					},
+				);
+			});
 
 			// Connected vaults (spoke list for this hub)
 			new Setting(hubBody).setName("Connected vaults").setHeading();
 			const spokesContainer = hubBody.createDiv();
-			void this.plugin.fetchHubSpokes().then((spokes) => {
+			const renderSpokes = (spokes: import("./settings").SpokeInfo[]) => {
 				spokesContainer.empty();
 				if (spokes.length === 0) {
 					spokesContainer.createEl("p", {
@@ -546,18 +570,40 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				} else {
 					const spokeCard = spokesContainer.createDiv({ cls: "yaos-settings-status-card" });
 					for (const spoke of spokes) {
-						addCardRow(
-							spokeCard,
-							spoke.deviceName,
-							`ID: ${shortenMiddle(spoke.spokeVaultId)} · Last seen: ${
+						const spokeRow = spokeCard.createDiv({ cls: "yaos-settings-card-row" });
+						spokeRow.createSpan({ text: spoke.deviceName, cls: "yaos-settings-card-label" });
+						spokeRow.createSpan({
+							text: `ID: ${shortenMiddle(spoke.spokeVaultId)} · Last seen: ${
 								spoke.lastSeen ? new Date(spoke.lastSeen).toLocaleDateString() : "never"
 							}`,
-						);
+							cls: "yaos-settings-card-value",
+						});
+						const removeBtn = spokeRow.createEl("button", { text: "Remove" });
+						removeBtn.addEventListener("click", () => {
+							confirmAction(
+								this.app,
+								"Remove spoke vault",
+								`Remove "${spoke.deviceName}" from this hub? The spoke vault will stop receiving hub content.`,
+								async () => {
+									removeBtn.disabled = true;
+									removeBtn.textContent = "Removing…";
+									try {
+										await this.plugin.removeSpokeFromHub(spoke.spokeVaultId);
+										void this.plugin.fetchHubSpokes().then(renderSpokes);
+									} catch (err) {
+										new Notice(`Failed to remove spoke: ${err instanceof Error ? err.message : String(err)}`, 6000);
+										removeBtn.disabled = false;
+										removeBtn.textContent = "Remove";
+									}
+								},
+							);
+						});
 					}
 				}
-			});
+			};
+			void this.plugin.fetchHubSpokes().then(renderSpokes);
 			const hubActions = hubBody.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
-			hubActions.createEl("button", { text: "Show invite details" }).addEventListener("click", () => {
+			hubActions.createEl("button", { text: "Invite another vault" }).addEventListener("click", () => {
 				const { host, vaultId, token } = this.plugin.settings;
 				if (!host || !vaultId || !token) {
 					new Notice("Configure the server URL, token, and vault ID first.", 6000);
@@ -572,11 +618,27 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 		// ── Spoke connections (collapsible) ───────────────────────────────────
 		const spokeConfigured = !!this.plugin.settings.spokeHubHost;
-		const spokeDetails = createDetailsSection(containerEl, "Spoke connections", spokeConfigured);
+		const spokeDetails = createDetailsSection(containerEl, "Spoke connections", true);
 		const spokeBody = spokeDetails.createDiv({ cls: "yaos-settings-details-body" });
 
 		if (spokeConfigured) {
 			const spokeCard = spokeBody.createDiv({ cls: "yaos-settings-status-card" });
+
+			const spokeLine = spokeCard.createDiv({ cls: "yaos-settings-status-line" });
+			const spokeTitleWrap = spokeLine.createDiv({ cls: "yaos-settings-status-copy" });
+			spokeTitleWrap.createEl("div", {
+				text: "Connected to hub vault",
+				cls: "yaos-settings-status-title",
+			});
+			spokeTitleWrap.createEl("div", {
+				text: "This vault is receiving shared content from a hub vault.",
+				cls: "yaos-settings-status-subtitle",
+			});
+			spokeLine.createSpan({
+				text: "connected",
+				cls: "yaos-settings-status-badge is-connected",
+			});
+
 			addCardRow(spokeCard, "Hub server", this.plugin.settings.spokeHubHost);
 			addCardRow(spokeCard, "Hub vault", shortenMiddle(this.plugin.settings.spokeHubVaultId || "(not set)"));
 			const spokeCardActions = spokeCard.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
@@ -589,11 +651,12 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				}
 			});
 			spokeCardActions.createEl("button", { text: "Disconnect" }).addEventListener("click", async () => {
-				this.plugin.settings.spokeHubHost = "";
-				this.plugin.settings.spokeHubVaultId = "";
-				this.plugin.settings.spokeHubToken = "";
-				this.plugin.settings.syncMode = "standalone";
-				await this.plugin.saveSettings();
+				try {
+					await this.plugin.disconnectFromHub();
+				} catch (err) {
+					new Notice(`Disconnect failed: ${err instanceof Error ? err.message : String(err)}`, 6000);
+					return;
+				}
 				this.display();
 			});
 		} else {
