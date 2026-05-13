@@ -3,6 +3,7 @@ import {
 	DEFAULT_SETTINGS,
 	VaultSyncSettingTab,
 	generateVaultId,
+	type RoomConfig,
 	type VaultSyncSettings,
 } from "./settings";
 import { VaultSync, type ReconcileMode } from "./sync/vaultSync";
@@ -189,6 +190,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	private blobSync: BlobSyncManager | null = null;
 	private statusBarEl: HTMLElement | null = null;
 	private statusInterval: ReturnType<typeof setInterval> | null = null;
+
+	private roomSyncs: Map<string, VaultSync> = new Map();
+	private roomDiskMirrors: Map<string, DiskMirror> = new Map();
+	private roomEditorBindings: Map<string, EditorBindingManager> = new Map();
 
 	/**
 	 * True after initial reconciliation is complete.
@@ -679,6 +684,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			if (providerSynced && this.serverSupportsSnapshots) {
 				void this.triggerDailySnapshot();
 			}
+
+			// Start room syncs after personal sync is up.
+			await this.startAllRooms();
 		} catch (err) {
 			console.error("[yaos] Failed to initialize sync:", err);
 			new Notice(`YAOS: failed to initialize — ${formatUnknown(err)}`);
@@ -1474,6 +1482,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	 */
 	private teardownSync(): void {
 		this.log("teardownSync: tearing down all sync state");
+
+		// Stop all room syncs first (fire-and-forget — teardown is sync).
+		void this.stopAllRooms();
 
 		this.editorBindings?.unbindAll();
 		this.diskMirror?.destroy();
@@ -3062,115 +3073,174 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		].join("\n");
 	}
 
-	// ── Hub-and-spoke ──────────────────────────────────────────────────────
+	// ── Rooms ─────────────────────────────────────────────────────────────
 
-	/**
-	 * Register this device as a spoke with the configured hub.
-	 * Applies the hub's initial Y-Doc state to seed hub content into this vault.
-	 */
-	async registerWithHub(): Promise<void> {
-		const { spokeHubHost, spokeHubVaultId, spokeHubToken, vaultId, deviceName } =
-			this.settings;
-		if (!spokeHubHost || !spokeHubVaultId || !spokeHubToken || !vaultId) {
-			throw new Error("Hub connection details are incomplete.");
-		}
-
-		const url = `${spokeHubHost.replace(/\/$/, "")}/hub/${encodeURIComponent(spokeHubVaultId)}/spokes`;
-		const res = await obsidianRequest({
-			url,
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${spokeHubToken}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({ spokeVaultId: vaultId, deviceName }),
-		});
-
-		if (res.status !== 200) {
-			throw new Error(`Hub registration failed (${res.status})`);
-		}
-
-		const payload = JSON.parse(res.text) as {
-			ok?: boolean;
-			initialStateUpdate?: string | null;
+	/** Create a new room as hub. Generates a roomId, saves config, starts room sync. */
+	async createRoom(displayName: string, includePaths: string[]): Promise<RoomConfig> {
+		const room: RoomConfig = {
+			roomId: generateVaultId(),
+			role: "hub",
+			displayName,
+			includePaths,
 		};
-
-		if (!payload.ok) {
-			throw new Error("Hub registration returned not-ok.");
-		}
-
-		// Seed hub content into our Y.Doc by applying the initial state update.
-		if (payload.initialStateUpdate && this.vaultSync) {
-			try {
-				const binaryStr = atob(payload.initialStateUpdate);
-				const bytes = new Uint8Array(binaryStr.length);
-				for (let i = 0; i < binaryStr.length; i++) {
-					bytes[i] = binaryStr.charCodeAt(i);
-				}
-				this.vaultSync.applyRemoteUpdate(bytes, "hub-seed");
-				this.log("Hub initial state applied.");
-			} catch (err) {
-				console.warn("[yaos] Failed to apply hub initial state:", err);
-			}
-		}
+		this.settings.rooms = [...this.settings.rooms, room];
+		await this.saveSettings();
+		await this.startRoomSync(room);
+		return room;
 	}
 
-	/** Deregister this vault from its hub, then clear spoke settings locally. Best-effort server call. */
-	async disconnectFromHub(): Promise<void> {
-		const { spokeHubHost, spokeHubVaultId, spokeHubToken, vaultId } = this.settings;
-		if (spokeHubHost && spokeHubVaultId && spokeHubToken && vaultId) {
-			try {
-				await obsidianRequest({
-					url: `${spokeHubHost.replace(/\/$/, "")}/hub/${encodeURIComponent(spokeHubVaultId)}/spokes/${encodeURIComponent(vaultId)}`,
-					method: "DELETE",
-					headers: { Authorization: `Bearer ${spokeHubToken}` },
-				});
-			} catch (err) {
-				console.warn("[yaos] spoke deregister failed (clearing local settings anyway):", err);
-			}
+	/** Join an existing room as spoke. Saves config, starts room sync. */
+	async joinRoom(roomId: string, displayName: string, includePaths: string[]): Promise<void> {
+		if (this.settings.rooms.find((r) => r.roomId === roomId)) {
+			throw new Error("Already in this room.");
 		}
-		this.settings.spokeHubHost = "";
-		this.settings.spokeHubVaultId = "";
-		this.settings.spokeHubToken = "";
-		// hub+spoke → hub; spoke → standalone
-		this.settings.syncMode = this.settings.syncMode === "hub+spoke" ? "hub" : "standalone";
+		const room: RoomConfig = {
+			roomId,
+			role: "spoke",
+			displayName,
+			includePaths,
+		};
+		this.settings.rooms = [...this.settings.rooms, room];
+		await this.saveSettings();
+		await this.startRoomSync(room);
+	}
+
+	/** Leave a room — stops its sync and removes it from settings. */
+	async leaveRoom(roomId: string): Promise<void> {
+		await this.stopRoomSync(roomId);
+		this.settings.rooms = this.settings.rooms.filter((r) => r.roomId !== roomId);
 		await this.saveSettings();
 	}
 
-	/** Remove a specific spoke vault from this hub's registry. Throws on server error. */
-	async removeSpokeFromHub(spokeVaultId: string): Promise<void> {
-		const { host, vaultId, token } = this.settings;
-		if (!host || !vaultId || !token) throw new Error("Hub connection not configured.");
-		const res = await obsidianRequest({
-			url: `${host.replace(/\/$/, "")}/hub/${encodeURIComponent(vaultId)}/spokes/${encodeURIComponent(spokeVaultId)}`,
-			method: "DELETE",
-			headers: { Authorization: `Bearer ${token}` },
+	/** Start VaultSync + DiskMirror for a single room. */
+	private async startRoomSync(room: RoomConfig): Promise<void> {
+		if (this.roomSyncs.has(room.roomId)) return;
+		if (!this.settings.host || !this.settings.token) return;
+
+		const roomSettings: VaultSyncSettings = {
+			...this.settings,
+			vaultId: room.roomId,
+			includePaths: room.includePaths.join(", "),
+			excludePatterns: "",
+			rooms: [],
+		};
+
+		const roomSync = new VaultSync(roomSettings, {
+			traceContext: this.getTraceHttpContext(),
+			trace: (source, msg, details) => this.trace(source, msg, details),
 		});
-		if (res.status !== 200) {
-			throw new Error(`Server returned ${res.status}`);
+		this.roomSyncs.set(room.roomId, roomSync);
+
+		const roomEditorBindings = new EditorBindingManager(
+			roomSync,
+			this.settings.debug,
+			(source, msg, details) => this.trace(source, msg, details),
+		);
+		this.roomEditorBindings.set(room.roomId, roomEditorBindings);
+
+		const roomMirror = new DiskMirror(
+			this.app,
+			roomSync,
+			roomEditorBindings,
+			this.settings.debug,
+			(source, msg, details) => this.trace(source, msg, details),
+			() => this.settings.frontmatterGuardEnabled,
+			(path, direction, reason, validation, prev, next) =>
+				this.handleFrontmatterValidation(path, direction, reason, validation, prev, next),
+			(path) => {
+				const included = room.includePaths;
+				if (included.length === 0) return true;
+				return included.some((prefix) => path.startsWith(prefix));
+			},
+		);
+		roomMirror.startMapObservers();
+		this.roomDiskMirrors.set(room.roomId, roomMirror);
+
+		this.log(`Room sync started: ${room.displayName} (${room.roomId})`);
+	}
+
+	/** Stop and destroy a room's sync subsystems. */
+	private async stopRoomSync(roomId: string): Promise<void> {
+		this.roomEditorBindings.get(roomId)?.unbindAll();
+		this.roomEditorBindings.delete(roomId);
+		this.roomDiskMirrors.get(roomId)?.destroy();
+		this.roomDiskMirrors.delete(roomId);
+		this.roomSyncs.get(roomId)?.destroy();
+		this.roomSyncs.delete(roomId);
+		this.log(`Room sync stopped: ${roomId}`);
+	}
+
+	private async startAllRooms(): Promise<void> {
+		for (const room of this.settings.rooms) {
+			await this.startRoomSync(room);
 		}
 	}
 
-	/**
-	 * Fetch the list of spokes registered with this vault's hub registry.
-	 * Only meaningful when `syncMode === "hub"`.
-	 */
-	async fetchHubSpokes(): Promise<import("./settings").SpokeInfo[]> {
-		const { host, vaultId, token } = this.settings;
-		if (!host || !vaultId || !token) return [];
-		try {
-			const url = `${host.replace(/\/$/, "")}/hub/${encodeURIComponent(vaultId)}/spokes`;
-			const res = await obsidianRequest({
-				url,
-				method: "GET",
-				headers: { Authorization: `Bearer ${token}` },
-			});
-			if (res.status !== 200) return [];
-			const payload = JSON.parse(res.text) as { spokes?: import("./settings").SpokeInfo[] };
-			return Array.isArray(payload.spokes) ? payload.spokes : [];
-		} catch {
-			return [];
+	private async stopAllRooms(): Promise<void> {
+		for (const roomId of [...this.roomSyncs.keys()]) {
+			await this.stopRoomSync(roomId);
 		}
+	}
+
+	/** Parse and apply a room invite URL (obsidian://yaos?action=room&…). Called from settings UI. */
+	async handleRoomInviteUrl(rawUrl: string): Promise<void> {
+		let params: URLSearchParams;
+		try {
+			const url = new URL(rawUrl);
+			params = url.searchParams;
+		} catch {
+			throw new Error("Invalid invite URL.");
+		}
+
+		const action = params.get("action");
+		if (action !== "room") throw new Error("This is not a room invite link.");
+
+		const roomId = params.get("roomId")?.trim() ?? "";
+		const host = params.get("host")?.trim() ?? "";
+		const token = params.get("token")?.trim() ?? "";
+		const name = params.get("name")?.trim() ?? "Shared room";
+		const pathsRaw = params.get("paths")?.trim() ?? "";
+		const includePaths = pathsRaw ? pathsRaw.split(",").map((p) => p.trim()).filter(Boolean) : [];
+
+		await this.handleRoomJoinParams({ roomId, host, token, name, includePaths });
+	}
+
+	/** Internal handler for both protocol URL and settings UI join flows. */
+	private async handleRoomJoinParams(p: {
+		roomId: string;
+		host: string;
+		token: string;
+		name: string;
+		includePaths: string[];
+	}): Promise<void> {
+		if (!p.roomId) throw new Error("Invite link is missing roomId.");
+
+		if (this.settings.rooms.find((r) => r.roomId === p.roomId)) {
+			new Notice(`Already in room "${p.name}".`, 5000);
+			return;
+		}
+
+		let restartNeeded = false;
+		if (!this.settings.host || !this.settings.token) {
+			if (!p.host || !p.token) {
+				throw new Error("Invite link is missing host/token, and this vault has no server connection.");
+			}
+			this.settings.host = p.host;
+			this.settings.token = p.token;
+			restartNeeded = true;
+		} else if (p.host && this.settings.host !== p.host) {
+			new Notice("This invite is for a different host server. Existing connection kept.", 8000);
+		}
+
+		await this.joinRoom(p.roomId, p.name, p.includePaths);
+
+		if (restartNeeded) {
+			this.teardownSync();
+			await this.initSync();
+		}
+
+		new Notice(`Joined room "${p.name}". Shared files are syncing.`, 6000);
+		this.settingTab?.display();
 	}
 
 	private createBlobSyncManager(): BlobSyncManager | null {
@@ -3819,69 +3889,19 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		});
 	}
 
-		private async handleSpokeSetupLink(params: Record<string, string>): Promise<void> {
-		const host = typeof params.host === "string" ? params.host.trim() : "";
-		const hubVaultId = typeof params.hubVaultId === "string" ? params.hubVaultId.trim() : "";
-		const token = typeof params.token === "string" ? params.token.trim() : "";
-
-		if (!hubVaultId) {
-			new Notice("Spoke invite link is missing the hub vault ID.", 7000);
-			return;
-		}
-
-		// Only apply host+token from the invite if this vault has no server connection yet.
-		// Hub and spoke vaults share the same Cloudflare Worker — an existing connection is reused.
-		let restartNeeded = false;
-		if (!this.settings.host || !this.settings.token) {
-			if (!host || !token) {
-				new Notice("Spoke invite link is missing host or token, and this vault has no server connection configured.", 7000);
-				return;
-			}
-			this.settings.host = host;
-			this.settings.token = token;
-			restartNeeded = true;
-		} else if (host && this.settings.host !== host) {
-			new Notice(
-				"This invite is for a different host server. Your existing connection was kept. Connect to the hub's host first if needed.",
-				10000,
-			);
-		}
-
-		// Always populate spoke fields from the current host connection.
-		this.settings.spokeHubHost = this.settings.host;
-		this.settings.spokeHubVaultId = hubVaultId;
-		this.settings.spokeHubToken = this.settings.token;
-		await this.saveSettings();
-
-		const currentMode = this.settings.syncMode;
-		const newMode = (currentMode === "hub" || currentMode === "hub+spoke") ? "hub+spoke" : "spoke";
-
-		if (!this.settings.vaultId) {
-			this.settings.vaultId = generateVaultId();
-			await this.saveSettings();
-		}
-
-		try {
-			await this.registerWithHub();
-			this.settings.syncMode = newMode;
-			await this.saveSettings();
-			new Notice("Connected to hub vault. Hub content will appear shortly.", 6000);
-		} catch (err) {
-			new Notice(
-				`Hub registration failed: ${err instanceof Error ? err.message : String(err)}. Make sure the hub server is deployed and accessible.`,
-				10000,
-			);
-		}
-		this.settingTab?.display();
-		if (restartNeeded) {
-			this.teardownSync();
-			void this.initSync();
-		}
-	}
-
 	private async handleSetupLink(params: Record<string, string>): Promise<void> {
-		if (typeof params.hubVaultId === "string" && params.hubVaultId.trim()) {
-			await this.handleSpokeSetupLink(params);
+		if (params.action === "room") {
+			const roomId = typeof params.roomId === "string" ? params.roomId.trim() : "";
+			const host = typeof params.host === "string" ? params.host.trim() : "";
+			const token = typeof params.token === "string" ? params.token.trim() : "";
+			const name = typeof params.name === "string" ? params.name.trim() : "Shared room";
+			const pathsRaw = typeof params.paths === "string" ? params.paths.trim() : "";
+			const includePaths = pathsRaw ? pathsRaw.split(",").map((p) => p.trim()).filter(Boolean) : [];
+			try {
+				await this.handleRoomJoinParams({ roomId, host, token, name, includePaths });
+			} catch (err) {
+				new Notice(`Failed to join room: ${err instanceof Error ? err.message : String(err)}`, 8000);
+			}
 			return;
 		}
 
