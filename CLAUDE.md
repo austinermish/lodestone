@@ -147,6 +147,18 @@ Obsidian file event
 - Mobile compatibility is required (`isDesktopOnly: false`) — avoid Node/Electron APIs in plugin code
 - Use `this.registerEvent`, `this.registerDomEvent`, `this.registerInterval` for all listeners so they're cleaned up on unload
 
+## yaos.md — one-page documentation
+
+`yaos.md` is the canonical single-page reference for YAOS. Keep it up to date as the plugin evolves. Add entries for:
+
+- New terminology or redefined terms (e.g., when "host" vs "hub" distinction was formalized)
+- New sync modes or topology changes
+- New URL formats or protocol changes (invite links, deep links, obsidian:// actions)
+- Constraints that are non-obvious from the code — limits, unsupported topologies, required conditions
+- Settings fields that have non-trivial semantics worth documenting
+
+Do **not** add ephemeral details (current bug status, in-progress work, version-specific notes). The file is meant to be a durable reference that survives cleanup.
+
 ## Engineering docs
 
 Deep design rationale lives in `engineering/`. Key reads before touching a subsystem:
