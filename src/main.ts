@@ -3856,6 +3856,11 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const currentMode = this.settings.syncMode;
 		const newMode = (currentMode === "hub" || currentMode === "hub+spoke") ? "hub+spoke" : "spoke";
 
+		if (!this.settings.vaultId) {
+			this.settings.vaultId = generateVaultId();
+			await this.saveSettings();
+		}
+
 		try {
 			await this.registerWithHub();
 			this.settings.syncMode = newMode;

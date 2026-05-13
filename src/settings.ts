@@ -692,6 +692,10 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						// Spoke connects to the same host — populate spoke fields from existing connection.
 						this.plugin.settings.spokeHubHost = host;
 						this.plugin.settings.spokeHubToken = token;
+						if (!this.plugin.settings.vaultId) {
+							this.plugin.settings.vaultId = generateVaultId();
+							await this.plugin.saveSettings();
+						}
 						try {
 							await this.plugin.registerWithHub();
 							this.plugin.settings.syncMode = isHub ? "hub+spoke" : "spoke";
@@ -1075,6 +1079,16 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			);
 	}
 
+	private async maybeBootstrapConnection(): Promise<void> {
+		const { host, token } = this.plugin.settings;
+		if (!host || !token) return;
+		if (!this.plugin.settings.vaultId) {
+			this.plugin.settings.vaultId = generateVaultId();
+			await this.plugin.saveSettings();
+		}
+		this.plugin.maybeStartSync();
+	}
+
 	private renderConnectionFields(containerEl: HTMLElement, authMode: string): void {
 		new Setting(containerEl)
 			.setName("Host URL")
@@ -1086,6 +1100,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.host = value.trim();
 						await this.plugin.saveSettings();
+						await this.maybeBootstrapConnection();
 						this.display();
 					}),
 			);
@@ -1113,6 +1128,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.token = value.trim();
 						await this.plugin.saveSettings();
+						await this.maybeBootstrapConnection();
 						this.display();
 					}),
 			);
