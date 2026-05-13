@@ -3117,10 +3117,12 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		if (this.roomSyncs.has(room.roomId)) return;
 		if (!this.settings.host || !this.settings.token) return;
 
+		// Hub: scope to the shared folders. Spoke: unscoped — mirror everything in the room Y.Doc.
+		const isHub = room.role === "hub";
 		const roomSettings: VaultSyncSettings = {
 			...this.settings,
 			vaultId: room.roomId,
-			includePaths: room.includePaths.join(", "),
+			includePaths: isHub ? room.includePaths.join(", ") : "",
 			excludePatterns: "",
 			rooms: [],
 		};
@@ -3138,6 +3140,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		);
 		this.roomEditorBindings.set(room.roomId, roomEditorBindings);
 
+		const hubPaths = room.includePaths;
 		const roomMirror = new DiskMirror(
 			this.app,
 			roomSync,
@@ -3148,9 +3151,11 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			(path, direction, reason, validation, prev, next) =>
 				this.handleFrontmatterValidation(path, direction, reason, validation, prev, next),
 			(path) => {
-				const included = room.includePaths;
-				if (included.length === 0) return true;
-				return included.some((prefix) => path.startsWith(prefix));
+				// Hub: only mirror files inside the shared folders.
+				// Spoke: mirror everything from the room Y.Doc (already scoped by the hub).
+				if (!isHub) return true;
+				if (hubPaths.length === 0) return true;
+				return hubPaths.some((prefix) => path.startsWith(prefix));
 			},
 		);
 		roomMirror.startMapObservers();
@@ -3199,10 +3204,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const host = params.get("host")?.trim() ?? "";
 		const token = params.get("token")?.trim() ?? "";
 		const name = params.get("name")?.trim() ?? "Shared room";
-		const pathsRaw = params.get("paths")?.trim() ?? "";
-		const includePaths = pathsRaw ? pathsRaw.split(",").map((p) => p.trim()).filter(Boolean) : [];
 
-		await this.handleRoomJoinParams({ roomId, host, token, name, includePaths });
+		await this.handleRoomJoinParams({ roomId, host, token, name });
 	}
 
 	/** Internal handler for both protocol URL and settings UI join flows. */
@@ -3211,7 +3214,6 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		host: string;
 		token: string;
 		name: string;
-		includePaths: string[];
 	}): Promise<void> {
 		if (!p.roomId) throw new Error("Invite link is missing roomId.");
 
@@ -3232,7 +3234,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			new Notice("This invite is for a different host server. Existing connection kept.", 8000);
 		}
 
-		await this.joinRoom(p.roomId, p.name, p.includePaths);
+		// Spoke joins with no includePaths — the room Y.Doc is already scoped by the hub.
+		await this.joinRoom(p.roomId, p.name, []);
 
 		if (restartNeeded) {
 			this.teardownSync();
@@ -3895,10 +3898,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			const host = typeof params.host === "string" ? params.host.trim() : "";
 			const token = typeof params.token === "string" ? params.token.trim() : "";
 			const name = typeof params.name === "string" ? params.name.trim() : "Shared room";
-			const pathsRaw = typeof params.paths === "string" ? params.paths.trim() : "";
-			const includePaths = pathsRaw ? pathsRaw.split(",").map((p) => p.trim()).filter(Boolean) : [];
 			try {
-				await this.handleRoomJoinParams({ roomId, host, token, name, includePaths });
+				await this.handleRoomJoinParams({ roomId, host, token, name });
 			} catch (err) {
 				new Notice(`Failed to join room: ${err instanceof Error ? err.message : String(err)}`, 8000);
 			}

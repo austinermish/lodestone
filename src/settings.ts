@@ -562,7 +562,6 @@ function buildRoomInviteUrl(host: string, token: string, room: RoomConfig): stri
 		token,
 		roomId: room.roomId,
 		name: room.displayName,
-		paths: room.includePaths.join(","),
 	});
 	return `obsidian://yaos?${params.toString()}`;
 }
