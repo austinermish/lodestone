@@ -505,6 +505,103 @@ class CreateRoomModal extends Modal {
 	}
 }
 
+class EditRoomModal extends Modal {
+	private roomName: string;
+	private selectedPaths: string[];
+	private onConfirm: (name: string, paths: string[]) => Promise<void>;
+	private pathListEl: HTMLElement | null = null;
+
+	constructor(
+		app: App,
+		initialName: string,
+		initialPaths: string[],
+		onConfirm: (name: string, paths: string[]) => Promise<void>,
+	) {
+		super(app);
+		this.roomName = initialName;
+		this.selectedPaths = [...initialPaths];
+		this.onConfirm = onConfirm;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.addClass("yaos-pair-device-modal");
+		contentEl.createEl("h3", { text: "Edit room" });
+
+		new Setting(contentEl)
+			.setName("Room name")
+			.setDesc("A label to identify this collaboration room.")
+			.addText((text) => {
+				text.setValue(this.roomName).onChange((v) => { this.roomName = v.trim(); });
+				text.inputEl.focus();
+			});
+
+		new Setting(contentEl)
+			.setName("Shared folders")
+			.setDesc("Only files inside these folders are shared into the room.")
+			.addButton((btn) =>
+				btn.setButtonText("Add folder").onClick(() => {
+					new FolderPickerModal(this.app, (folder) => {
+						const entry = folder.path.endsWith("/") ? folder.path : `${folder.path}/`;
+						if (!this.selectedPaths.includes(entry)) {
+							this.selectedPaths.push(entry);
+							this.renderPathList();
+						}
+					}).open();
+				}),
+			);
+
+		this.pathListEl = contentEl.createDiv({ cls: "yaos-settings-details-body" });
+		this.renderPathList();
+
+		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
+		buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+		const saveBtn = buttons.createEl("button", { text: "Save changes", cls: "mod-cta" });
+		saveBtn.addEventListener("click", async () => {
+			if (!this.roomName) {
+				new Notice("Enter a room name first.", 4000);
+				return;
+			}
+			if (this.selectedPaths.length === 0) {
+				new Notice("Add at least one folder to share.", 4000);
+				return;
+			}
+			saveBtn.disabled = true;
+			saveBtn.textContent = "Saving…";
+			try {
+				await this.onConfirm(this.roomName, [...this.selectedPaths]);
+				this.close();
+			} catch (err) {
+				new Notice(`Failed to save room: ${err instanceof Error ? err.message : String(err)}`, 6000);
+				saveBtn.disabled = false;
+				saveBtn.textContent = "Save changes";
+			}
+		});
+	}
+
+	private renderPathList(): void {
+		if (!this.pathListEl) return;
+		this.pathListEl.empty();
+		if (this.selectedPaths.length === 0) {
+			this.pathListEl.createEl("p", { text: "No folders selected.", cls: "setting-item-description" });
+			return;
+		}
+		for (const p of this.selectedPaths) {
+			const row = this.pathListEl.createDiv({ cls: "yaos-settings-card-row" });
+			row.createSpan({ text: p, cls: "yaos-settings-card-value" });
+			row.createEl("button", { text: "Remove" }).addEventListener("click", () => {
+				this.selectedPaths = this.selectedPaths.filter((x) => x !== p);
+				this.renderPathList();
+			});
+		}
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
 class JoinRoomModal extends Modal {
 	private onJoin: (inviteUrl: string) => Promise<void>;
 
@@ -727,6 +824,18 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 							}
 							new RoomInviteModal(this.app, host, token, room).open();
 						});
+
+						actions.createEl("button", { text: "Edit" }).addEventListener("click", () => {
+							new EditRoomModal(
+								this.app,
+								room.displayName,
+								room.includePaths,
+								async (name, paths) => {
+									await this.plugin.updateRoom(room.roomId, name, paths);
+									this.display();
+								},
+							).open();
+						});
 					}
 
 					actions.createEl("button", { text: "Leave room" }).addEventListener("click", () => {
@@ -852,63 +961,6 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 		// ── Sync filters ──────────────────────────────────────────────────────
 		{
 			addSectionHeading(containerEl, "Sync filters");
-			new Setting(containerEl)
-				.setName("Folders to sync")
-				.setDesc("Only sync files inside these folders. Separate multiple folders with commas. Leave empty to sync everything. Example: Projects/Shared/, Team Notes/")
-				.addText((text) =>
-					text
-						.setPlaceholder("Example: Projects/Shared/, Team Notes/")
-						.setValue(this.plugin.settings.includePaths)
-						.onChange(async (value) => {
-							this.plugin.settings.includePaths = value;
-							await this.plugin.saveSettings();
-							this.plugin.onSettingsChanged();
-						}),
-				)
-				.addButton((btn) =>
-					btn
-						.setButtonText("Add folder")
-						.onClick(() => {
-							new FolderPickerModal(this.app, async (folder) => {
-								this.plugin.settings.includePaths = appendFolderPath(
-									this.plugin.settings.includePaths,
-									folder.path,
-								);
-								await this.plugin.saveSettings();
-								this.plugin.onSettingsChanged();
-								this.display();
-							}).open();
-						}),
-				);
-
-			new Setting(containerEl)
-				.setName("Excluded paths")
-				.setDesc("Paths to skip, separated by commas. Example: templates/, .trash/, daily-notes/")
-				.addText((text) =>
-					text
-						.setPlaceholder("Example: templates/, daily-notes/")
-						.setValue(this.plugin.settings.excludePatterns)
-						.onChange(async (value) => {
-							this.plugin.settings.excludePatterns = value;
-							await this.plugin.saveSettings();
-							this.plugin.onSettingsChanged();
-						}),
-				)
-				.addButton((btn) =>
-					btn
-						.setButtonText("Add folder")
-						.onClick(() => {
-							new FolderPickerModal(this.app, async (folder) => {
-								this.plugin.settings.excludePatterns = appendFolderPath(
-									this.plugin.settings.excludePatterns,
-									folder.path,
-								);
-								await this.plugin.saveSettings();
-								this.plugin.onSettingsChanged();
-								this.display();
-							}).open();
-						}),
-				);
 
 			new Setting(containerEl)
 				.setName("Max note size (KB)")

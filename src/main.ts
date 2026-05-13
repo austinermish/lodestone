@@ -1187,10 +1187,46 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	// Editor binding
 	// -------------------------------------------------------------------
 
+	/**
+	 * Returns the appropriate EditorBindingManager for a given file path.
+	 * Hub vaults use the room binding for files inside shared folders.
+	 * All other files use the personal vault binding.
+	 */
+	private getBindingManagerForFile(filePath: string): EditorBindingManager | null {
+		for (const room of this.settings.rooms) {
+			if (room.role !== "hub") continue;
+			if (room.includePaths.length === 0) continue;
+			const mgr = this.roomEditorBindings.get(room.roomId);
+			if (!mgr) continue;
+			if (room.includePaths.some((p) => filePath.startsWith(p))) return mgr;
+		}
+		return this.editorBindings;
+	}
+
+	/**
+	 * Bind an editor view to the correct binding manager (room or personal vault),
+	 * unbinding from any other manager first to avoid double-binding.
+	 */
+	private bindViewToCorrectManager(view: MarkdownView, deviceName: string): void {
+		const file = view.file;
+		if (!file) return;
+		const target = this.getBindingManagerForFile(file.path);
+
+		// Unbind from any manager that is not the target
+		if (target !== this.editorBindings) {
+			this.editorBindings?.unbind(view);
+		}
+		for (const [, mgr] of this.roomEditorBindings) {
+			if (mgr !== target) mgr.unbind(view);
+		}
+
+		target?.bind(view, deviceName);
+	}
+
 	private bindAllOpenEditors(): void {
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (leaf.view instanceof MarkdownView) {
-				this.editorBindings?.bind(leaf.view, this.settings.deviceName);
+				this.bindViewToCorrectManager(leaf.view, this.settings.deviceName);
 				if (leaf.view.file) {
 					this.trackOpenFile(leaf.view.file.path);
 				}
@@ -1207,8 +1243,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				return;
 			}
 
-			const binding = this.editorBindings?.getBindingDebugInfoForView(leaf.view) ?? null;
-			const health = this.editorBindings?.getBindingHealthForView(leaf.view) ?? null;
+			const mgr = this.getBindingManagerForFile(leaf.view.file.path) ?? this.editorBindings;
+			const binding = mgr?.getBindingDebugInfoForView(leaf.view) ?? null;
+			const health = mgr?.getBindingHealthForView(leaf.view) ?? null;
 
 			if (health?.bound && (health.healthy || health.settling)) {
 				return;
@@ -1216,17 +1253,17 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 
 			touched += 1;
 			if (!binding || !health?.bound) {
-				this.editorBindings?.bind(leaf.view, this.settings.deviceName);
+				this.bindViewToCorrectManager(leaf.view, this.settings.deviceName);
 				return;
 			}
 
-			const repaired = this.editorBindings?.repair(
+			const repaired = mgr?.repair(
 				leaf.view,
 				this.settings.deviceName,
 				`validate:${reason}`,
 			) ?? false;
 			if (!repaired) {
-				this.editorBindings?.rebind(
+				mgr?.rebind(
 					leaf.view,
 					this.settings.deviceName,
 					`validate:${reason}`,
@@ -1352,7 +1389,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				if (!leaf) return;
 				const view = leaf.view;
 				if (view instanceof MarkdownView) {
-					this.editorBindings?.bind(view, this.settings.deviceName);
+					this.bindViewToCorrectManager(view, this.settings.deviceName);
 					if (view.file) {
 						this.trackOpenFile(view.file.path);
 					}
@@ -1370,7 +1407,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				if (!file) return;
 				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (view && view.file?.path === file.path) {
-					this.editorBindings?.bind(view, this.settings.deviceName);
+					this.bindViewToCorrectManager(view, this.settings.deviceName);
 					this.trackOpenFile(file.path);
 				}
 
@@ -1423,6 +1460,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 						return;
 					}
 					this.editorBindings?.unbindByPath(file.path);
+					for (const mgr of this.roomEditorBindings.values()) mgr.unbindByPath(file.path);
 					this.diskMirror?.notifyFileClosed(file.path);
 					this.openFilePaths.delete(file.path);
 
@@ -3139,6 +3177,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			(source, msg, details) => this.trace(source, msg, details),
 		);
 		this.roomEditorBindings.set(room.roomId, roomEditorBindings);
+		// Register the room's CM6 compartment so editors can be bound to it.
+		this.registerEditorExtension(roomEditorBindings.getBaseExtension());
 
 		const hubPaths = room.includePaths;
 		const roomMirror = new DiskMirror(
@@ -3162,6 +3202,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		this.roomDiskMirrors.set(room.roomId, roomMirror);
 
 		this.log(`Room sync started: ${room.displayName} (${room.roomId})`);
+
+		// Seed the room Y.Doc with hub files and rebind any open editors.
+		void this.seedRoomAndRebindEditors(room, roomSync);
 	}
 
 	/** Stop and destroy a room's sync subsystems. */
@@ -3184,6 +3227,62 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	private async stopAllRooms(): Promise<void> {
 		for (const roomId of [...this.roomSyncs.keys()]) {
 			await this.stopRoomSync(roomId);
+		}
+	}
+
+	/** Update a hub room's display name and shared folders, then restart its sync. */
+	async updateRoom(roomId: string, displayName: string, includePaths: string[]): Promise<void> {
+		const idx = this.settings.rooms.findIndex((r) => r.roomId === roomId);
+		if (idx < 0) throw new Error("Room not found.");
+		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+		const existing = this.settings.rooms[idx]!;
+		const updated: RoomConfig = { ...existing, displayName, includePaths };
+		this.settings.rooms[idx] = updated;
+		await this.saveSettings();
+		await this.stopRoomSync(roomId);
+		await this.startRoomSync(updated);
+	}
+
+	/**
+	 * After a room's sync starts, seed the room Y.Doc with hub files (if needed)
+	 * and rebind any open editors to the correct binding manager.
+	 */
+	private async seedRoomAndRebindEditors(room: RoomConfig, roomSync: VaultSync): Promise<void> {
+		if (room.role === "hub" && room.includePaths.length > 0) {
+			await this.seedRoomFromDisk(room, roomSync);
+		}
+		// Rebind open editors so files in shared folders use the room binding.
+		if (this.reconciled) {
+			this.bindAllOpenEditors();
+		}
+	}
+
+	/**
+	 * Seed the room Y.Doc with files from the hub's shared folders.
+	 * Called after the room provider syncs so we can detect which files are already present.
+	 */
+	private async seedRoomFromDisk(room: RoomConfig, roomSync: VaultSync): Promise<void> {
+		await roomSync.waitForProviderSync();
+
+		const allFiles = this.app.vault.getMarkdownFiles();
+		let seeded = 0;
+		for (const file of allFiles) {
+			if (!room.includePaths.some((p) => file.path.startsWith(p))) continue;
+			if (roomSync.getTextForPath(file.path)) continue; // already in room Y.Doc
+			if (this.maxFileSize > 0) {
+				const stat = await this.app.vault.adapter.stat(file.path);
+				if (stat && stat.size > this.maxFileSize) continue;
+			}
+			try {
+				const content = await this.app.vault.read(file);
+				roomSync.ensureFile(file.path, content, this.settings.deviceName);
+				seeded++;
+			} catch (err) {
+				this.log(`seedRoomFromDisk: failed for "${file.path}": ${String(err)}`);
+			}
+		}
+		if (seeded > 0) {
+			this.log(`Room "${room.displayName}": seeded ${seeded} file(s) from disk`);
 		}
 	}
 

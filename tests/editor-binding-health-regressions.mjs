@@ -33,8 +33,8 @@ console.log("\n--- Test 1: validateAllOpenBindings uses repair-only flow ---");
 		"private trackOpenFile(path: string): void {",
 	);
 	assert(section !== null, "validateAllOpenBindings section found");
-	assert(section?.includes("this.editorBindings?.repair("), "validateAllOpenBindings calls repair");
-	assert(!section?.includes("this.editorBindings?.heal("), "validateAllOpenBindings does not call heal");
+	assert(section?.includes("?.repair("), "validateAllOpenBindings calls repair");
+	assert(!section?.includes("?.heal("), "validateAllOpenBindings does not call heal");
 }
 
 console.log("\n--- Test 2: bind unhealthy path uses repair, not heal ---");

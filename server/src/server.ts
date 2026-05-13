@@ -63,6 +63,14 @@ export class VaultSyncServer extends YServer {
 		hibernate: true,
 	};
 
+	// Reduce the onSave debounce from the 2 s y-partyserver default so that
+	// cross-vault propagation (hub→spoke, spoke→hub) fires within ~100 ms of
+	// the last edit rather than after a 2–10 s idle window.
+	static callbackOptions = {
+		debounceWait: 100,
+		debounceMaxWait: 500,
+	};
+
 	private documentLoaded = false;
 	private loadPromise: Promise<void> | null = null;
 	private roomIdHint: string | null = null;
