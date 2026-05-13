@@ -35,7 +35,7 @@ interface ServerEnv {
 	YAOS_HUB?: DurableObjectNamespace;
 }
 
-type SyncMode = "hub" | "spoke" | "standalone";
+type SyncMode = "hub" | "spoke" | "standalone" | "hub+spoke";
 
 const MODE_STORAGE_KEY = "syncMode";
 const HUB_VAULT_ID_STORAGE_KEY = "hubVaultId";
@@ -162,10 +162,10 @@ export class VaultSyncServer extends YServer {
 				return json({ error: "invalid json" }, 400);
 			}
 			const mode = body.mode;
-			if (mode !== "hub" && mode !== "spoke" && mode !== "standalone") {
+			if (mode !== "hub" && mode !== "spoke" && mode !== "standalone" && mode !== "hub+spoke") {
 				return json({ error: "invalid mode" }, 400);
 			}
-			if (mode === "spoke" && typeof body.hubVaultId !== "string") {
+			if ((mode === "spoke" || mode === "hub+spoke") && typeof body.hubVaultId !== "string") {
 				return json({ error: "spoke mode requires hubVaultId" }, 400);
 			}
 			await this.ctx.storage.put(MODE_STORAGE_KEY, mode);
@@ -467,7 +467,7 @@ export class VaultSyncServer extends YServer {
 		const mode = await this.ctx.storage.get<string>(MODE_STORAGE_KEY);
 		const hubVaultId = await this.ctx.storage.get<string>(HUB_VAULT_ID_STORAGE_KEY);
 		this._mode =
-			mode === "hub" || mode === "spoke" || mode === "standalone"
+			mode === "hub" || mode === "spoke" || mode === "standalone" || mode === "hub+spoke"
 				? mode
 				: "standalone";
 		this._hubVaultId = typeof hubVaultId === "string" ? hubVaultId : null;
@@ -483,12 +483,13 @@ export class VaultSyncServer extends YServer {
 		if (!this._modeLoaded) await this.loadMode();
 		const env = this.env as ServerEnv;
 
-		if (this._mode === "spoke" && this._hubVaultId) {
+		// Spoke direction: propagate changes up to the hub.
+		if ((this._mode === "spoke" || this._mode === "hub+spoke") && this._hubVaultId) {
 			void propagateSpokeToHub(env, originVaultId, this._hubVaultId, delta);
-			return;
 		}
 
-		if (this._mode === "hub") {
+		// Hub direction: fan out changes down to all connected spokes.
+		if (this._mode === "hub" || this._mode === "hub+spoke") {
 			const spokes = await listHubSpokes(env, originVaultId);
 			if (spokes.length > 0) {
 				const filtered = this.buildFilteredUpdate(delta, this.getHubKnownPaths());

@@ -7,7 +7,7 @@ import { randomBase64Url } from "./utils/base64url";
 export type ExternalEditPolicy = "always" | "closed-only" | "never";
 
 /** Hub-and-spoke role for this device. */
-export type SyncMode = "standalone" | "hub" | "spoke";
+export type SyncMode = "standalone" | "hub" | "spoke" | "hub+spoke";
 
 /** Metadata about a spoke registered with this hub (mirrored from server for UI). */
 export interface SpokeInfo {
@@ -417,9 +417,9 @@ class SpokeInviteModal extends Modal {
 		const manualBody = manualDetails.createDiv({ cls: "yaos-settings-details-body" });
 
 		const fields = [
-			{ label: "Hub server URL", value: this.hubHost },
+			{ label: "Host URL", value: this.hubHost },
 			{ label: "Hub vault ID", value: this.hubVaultId },
-			{ label: "Hub sync token", value: this.hubToken },
+			{ label: "Sync token", value: this.hubToken },
 		];
 		for (const { label, value } of fields) {
 			const row = manualBody.createDiv({ cls: "yaos-settings-card-row" });
@@ -464,28 +464,26 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 		const attachmentsAvailable = this.plugin.serverSupportsAttachments;
 		const setupIncomplete = !this.plugin.settings.host || !this.plugin.settings.token;
 		const syncStatus = this.plugin.getSettingsStatusSummary();
+		const { syncMode } = this.plugin.settings;
+		const isHub = syncMode === "hub" || syncMode === "hub+spoke";
+		const isSpoke = syncMode === "spoke" || syncMode === "hub+spoke";
 
-		// ── Hub (collapsible) ────────────────────────────────────────────────
-		const hubDetails = createDetailsSection(containerEl, "Hub", !setupIncomplete);
-		const hubBody = hubDetails.createDiv({ cls: "yaos-settings-details-body" });
+		// ── Section 1: Connection (always shown) ──────────────────────────────
+		const connectionDetails = createDetailsSection(containerEl, "Connection", true);
+		const connectionBody = connectionDetails.createDiv({ cls: "yaos-settings-details-body" });
 
 		if (setupIncomplete) {
-			const callout = hubBody.createDiv({ cls: "callout yaos-settings-setup-callout" });
+			const callout = connectionBody.createDiv({ cls: "callout yaos-settings-setup-callout" });
 			callout.setAttr("data-callout", "warning");
-
-			const calloutTitle = callout.createDiv({ cls: "callout-title" });
-			calloutTitle.createSpan({ text: "Setup required" });
-
+			callout.createDiv({ cls: "callout-title" }).createSpan({ text: "Connection required" });
 			const calloutContent = callout.createDiv({ cls: "callout-content" });
 			calloutContent.createEl("p", {
-				text: "This plugin needs a free sync server to sync your data. It costs $0 and takes about 15 seconds.",
+				text: "YAOS needs a Cloudflare Worker (host) to sync your vault. Deployment is free and takes about 15 seconds.",
 			});
-
 			calloutContent.createEl("p", {
-				text: "After deployment, open your server URL, claim the server, then use the setup link.",
+				text: "After deployment, open your host URL in a browser, claim the server, then use the setup link.",
 				cls: "yaos-settings-setup-hint",
 			});
-
 			new Setting(calloutContent)
 				.setName("Deploy your server")
 				.setDesc("Start one-click deployment in your browser.")
@@ -497,17 +495,23 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 							window.open(CLOUDFLARE_DEPLOY_URL, "_blank", "noopener");
 						}),
 				);
-		} else {
-			const card = hubBody.createDiv({ cls: "yaos-settings-status-card" });
 
+			// Manual setup — expanded when no connection is configured
+			const manualDetails = createDetailsSection(connectionBody, "Manual setup", true);
+			const manualBody = manualDetails.createDiv({ cls: "yaos-settings-details-body" });
+			manualBody.createEl("p", {
+				text: "Claim your server in the browser, then use the setup link. You can also paste your connection details here directly.",
+				cls: "yaos-settings-details-intro",
+			});
+			this.renderConnectionFields(manualBody, authMode);
+		} else {
+			// Connected status card
+			const card = connectionBody.createDiv({ cls: "yaos-settings-status-card" });
 			const statusLine = card.createDiv({ cls: "yaos-settings-status-line" });
 			const titleWrap = statusLine.createDiv({ cls: "yaos-settings-status-copy" });
+			titleWrap.createEl("div", { text: "Connected to Host", cls: "yaos-settings-status-title" });
 			titleWrap.createEl("div", {
-				text: "Sync is configured",
-				cls: "yaos-settings-status-title",
-			});
-			titleWrap.createEl("div", {
-				text: "Use the actions below to pair more devices or back up your connection details.",
+				text: "Your vault is connected to its host server and syncing.",
 				cls: "yaos-settings-status-subtitle",
 			});
 			statusLine.createSpan({
@@ -515,17 +519,17 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				cls: `yaos-settings-status-badge ${statusClass(syncStatus.state)}`,
 			});
 
-			addCardRow(card, "Host server", this.plugin.settings.host);
-			addCardRow(card, "Host vault", shortenMiddle(this.plugin.settings.vaultId || "(not set)"));
-			addCardRow(card, "This device", this.plugin.settings.deviceName || "(unnamed)");
+			addCardRow(card, "Host", this.plugin.settings.host);
+			addCardRow(card, "Vault ID", shortenMiddle(this.plugin.settings.vaultId || "(not set)"));
+			addCardRow(card, "Device", this.plugin.settings.deviceName || "(unnamed)");
 
 			const connectedDevices = this.plugin.getConnectedDevices();
 			const othersOnline = connectedDevices.filter((d) => !d.isLocal);
 			const deviceRow = card.createDiv({ cls: "yaos-settings-card-row" });
-			deviceRow.createSpan({ text: "Devices in vault", cls: "yaos-settings-card-label" });
+			deviceRow.createSpan({ text: "Online devices", cls: "yaos-settings-card-label" });
 			const deviceValueEl = deviceRow.createDiv({ cls: "yaos-settings-card-value" });
 			if (othersOnline.length === 0) {
-				deviceValueEl.setText("None online");
+				deviceValueEl.setText("None");
 			} else {
 				for (const device of othersOnline) {
 					deviceValueEl.createDiv({ text: device.name });
@@ -536,7 +540,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			actionRow.createEl("button", { text: "Backup connection details" }).addEventListener("click", () => {
 				const recoveryKit = this.plugin.buildRecoveryKitText();
 				if (!recoveryKit) {
-					new Notice("Configure the server URL, sync token, and vault ID before exporting connection details.", 7000);
+					new Notice("Configure the host URL, sync token, and vault ID before exporting connection details.", 7000);
 					return;
 				}
 				new RecoveryKitModal(this.app, recoveryKit).open();
@@ -544,8 +548,8 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			actionRow.createEl("button", { text: "Reset connection" }).addEventListener("click", () => {
 				confirmAction(
 					this.app,
-					"Reset hub connection",
-					"This clears your server URL, token, and vault ID from this device. Your server data is not deleted. You can reclaim the server to reconnect.",
+					"Reset connection",
+					"This clears your host URL, token, and vault ID from this device. Your server data is not deleted. You can use the setup link to reconnect.",
 					async () => {
 						this.plugin.settings.host = "";
 						this.plugin.settings.token = "";
@@ -557,173 +561,183 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				);
 			});
 
-			// Connected vaults (spoke list for this hub)
-			new Setting(hubBody).setName("Connected vaults").setHeading();
-			const spokesContainer = hubBody.createDiv();
-			const renderSpokes = (spokes: import("./settings").SpokeInfo[]) => {
-				spokesContainer.empty();
-				if (spokes.length === 0) {
-					spokesContainer.createEl("p", {
-						text: "No vaults connected yet. Use the invite button to connect a vault.",
-						cls: "setting-item-description",
-					});
-				} else {
-					const spokeCard = spokesContainer.createDiv({ cls: "yaos-settings-status-card" });
-					for (const spoke of spokes) {
-						const spokeRow = spokeCard.createDiv({ cls: "yaos-settings-card-row" });
-						spokeRow.createSpan({ text: spoke.deviceName, cls: "yaos-settings-card-label" });
-						spokeRow.createSpan({
-							text: `ID: ${shortenMiddle(spoke.spokeVaultId)} · Last seen: ${
-								spoke.lastSeen ? new Date(spoke.lastSeen).toLocaleDateString() : "never"
-							}`,
-							cls: "yaos-settings-card-value",
-						});
-						const removeBtn = spokeRow.createEl("button", { text: "Remove" });
-						removeBtn.addEventListener("click", () => {
-							confirmAction(
-								this.app,
-								"Remove spoke vault",
-								`Remove "${spoke.deviceName}" from this hub? The spoke vault will stop receiving hub content.`,
-								async () => {
-									removeBtn.disabled = true;
-									removeBtn.textContent = "Removing…";
-									try {
-										await this.plugin.removeSpokeFromHub(spoke.spokeVaultId);
-										void this.plugin.fetchHubSpokes().then(renderSpokes);
-									} catch (err) {
-										new Notice(`Failed to remove spoke: ${err instanceof Error ? err.message : String(err)}`, 6000);
-										removeBtn.disabled = false;
-										removeBtn.textContent = "Remove";
-									}
-								},
-							);
-						});
-					}
-				}
-			};
-			void this.plugin.fetchHubSpokes().then(renderSpokes);
-			const hubActions = hubBody.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
-			hubActions.createEl("button", { text: "Invite another vault" }).addEventListener("click", () => {
-				const { host, vaultId, token } = this.plugin.settings;
-				if (!host || !vaultId || !token) {
-					new Notice("Configure the server URL, token, and vault ID first.", 6000);
-					return;
-				}
-				new SpokeInviteModal(this.app, host, vaultId, token).open();
-			});
-			hubActions.createEl("button", { text: "Refresh" }).addEventListener("click", () => {
-				void this.plugin.fetchHubSpokes().then(renderSpokes);
-			});
+			// Change connection (collapsed — for users who need to update host/token)
+			const changeDetails = createDetailsSection(connectionBody, "Change connection", false);
+			const changeBody = changeDetails.createDiv({ cls: "yaos-settings-details-body" });
+			this.renderConnectionFields(changeBody, authMode);
 		}
 
-		// ── Spoke connections (collapsible) ───────────────────────────────────
-		const spokeConfigured = !!this.plugin.settings.spokeHubHost;
-		const spokeDetails = createDetailsSection(containerEl, "Spoke connections", true);
-		const spokeBody = spokeDetails.createDiv({ cls: "yaos-settings-details-body" });
+		// ── Section 2: Share your notes (Hub role) ────────────────────────────
+		if (!setupIncomplete) {
+			const hubDetails = createDetailsSection(containerEl, "Share your notes", isHub);
+			const hubBody = hubDetails.createDiv({ cls: "yaos-settings-details-body" });
 
-		if (spokeConfigured) {
-			const spokeCard = spokeBody.createDiv({ cls: "yaos-settings-status-card" });
+			if (!isHub) {
+				hubBody.createEl("p", {
+					text: "Share this vault's notes with other vaults. Connected vaults receive your shared content in real time.",
+					cls: "setting-item-description",
+				});
+				hubBody
+					.createDiv({ cls: "modal-button-container yaos-settings-status-actions" })
+					.createEl("button", { text: "Start sharing", cls: "mod-cta" })
+					.addEventListener("click", async () => {
+						this.plugin.settings.syncMode = isSpoke ? "hub+spoke" : "hub";
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			} else {
+				// Hub active — show spoke list
+				const spokesContainer = hubBody.createDiv();
+				const renderSpokes = (spokes: SpokeInfo[]) => {
+					spokesContainer.empty();
+					if (spokes.length === 0) {
+						spokesContainer.createEl("p", {
+							text: "No vaults connected yet. Use the invite button to connect a vault.",
+							cls: "setting-item-description",
+						});
+					} else {
+						const spokeCard = spokesContainer.createDiv({ cls: "yaos-settings-status-card" });
+						for (const spoke of spokes) {
+							const spokeRow = spokeCard.createDiv({ cls: "yaos-settings-card-row" });
+							spokeRow.createSpan({ text: spoke.deviceName, cls: "yaos-settings-card-label" });
+							spokeRow.createSpan({
+								text: `ID: ${shortenMiddle(spoke.spokeVaultId)} · Last seen: ${
+									spoke.lastSeen ? new Date(spoke.lastSeen).toLocaleDateString() : "never"
+								}`,
+								cls: "yaos-settings-card-value",
+							});
+							const removeBtn = spokeRow.createEl("button", { text: "Remove" });
+							removeBtn.addEventListener("click", () => {
+								confirmAction(
+									this.app,
+									"Remove spoke vault",
+									`Remove "${spoke.deviceName}"? The spoke vault will stop receiving hub content.`,
+									async () => {
+										removeBtn.disabled = true;
+										removeBtn.textContent = "Removing…";
+										try {
+											await this.plugin.removeSpokeFromHub(spoke.spokeVaultId);
+											void this.plugin.fetchHubSpokes().then(renderSpokes);
+										} catch (err) {
+											new Notice(`Failed to remove spoke: ${err instanceof Error ? err.message : String(err)}`, 6000);
+											removeBtn.disabled = false;
+											removeBtn.textContent = "Remove";
+										}
+									},
+								);
+							});
+						}
+					}
+				};
+				void this.plugin.fetchHubSpokes().then(renderSpokes);
 
-			const spokeLine = spokeCard.createDiv({ cls: "yaos-settings-status-line" });
-			const spokeTitleWrap = spokeLine.createDiv({ cls: "yaos-settings-status-copy" });
-			spokeTitleWrap.createEl("div", {
-				text: "Connected to hub vault",
-				cls: "yaos-settings-status-title",
-			});
-			spokeTitleWrap.createEl("div", {
-				text: "This vault is receiving shared content from a hub vault.",
-				cls: "yaos-settings-status-subtitle",
-			});
-			spokeLine.createSpan({
-				text: "Connected",
-				cls: "yaos-settings-status-badge is-connected",
-			});
-
-			addCardRow(spokeCard, "Hub server", this.plugin.settings.spokeHubHost);
-			addCardRow(spokeCard, "Hub vault", shortenMiddle(this.plugin.settings.spokeHubVaultId || "(not set)"));
-			const spokeCardActions = spokeCard.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
-			spokeCardActions.createEl("button", { text: "Re-register" }).addEventListener("click", async () => {
-				try {
-					await this.plugin.registerWithHub();
-					new Notice("Re-registered with hub.");
-					this.plugin.maybeStartSync();
-				} catch (err) {
-					new Notice(`Re-registration failed: ${err instanceof Error ? err.message : String(err)}`, 8000);
-				}
-			});
-			spokeCardActions.createEl("button", { text: "Disconnect" }).addEventListener("click", async () => {
-				try {
-					await this.plugin.disconnectFromHub();
-				} catch (err) {
-					new Notice(`Disconnect failed: ${err instanceof Error ? err.message : String(err)}`, 6000);
-					return;
-				}
-				this.display();
-			});
-		} else {
-			spokeBody.createEl("p", {
-				text: "Connect to a hub vault to receive its shared content. Get the invite details from the hub vault.",
-				cls: "setting-item-description",
-			});
-			new Setting(spokeBody)
-				.setName("Hub server URL")
-				.setDesc("The URL of the server hosting the hub vault.")
-				.addText((text) =>
-					text
-						.setPlaceholder("https://sync.yourdomain.com")
-						.setValue(this.plugin.settings.spokeHubHost)
-						.onChange(async (value) => {
-							this.plugin.settings.spokeHubHost = value.trim();
-							await this.plugin.saveSettings();
-						}),
-				);
-			new Setting(spokeBody)
-				.setName("Hub vault ID")
-				.setDesc("The vault ID of the hub vault (given to you by the hub device).")
-				.addText((text) =>
-					text
-						.setPlaceholder("Paste hub vault ID")
-						.setValue(this.plugin.settings.spokeHubVaultId)
-						.onChange(async (value) => {
-							this.plugin.settings.spokeHubVaultId = value.trim();
-							await this.plugin.saveSettings();
-						}),
-				);
-			new Setting(spokeBody)
-				.setName("Hub sync token")
-				.setDesc("The sync token from the hub server (given to you by the hub admin).")
-				.addText((text) =>
-					text
-						.setPlaceholder("Paste hub token")
-						.setValue(this.plugin.settings.spokeHubToken)
-						.onChange(async (value) => {
-							this.plugin.settings.spokeHubToken = value.trim();
-							await this.plugin.saveSettings();
-						}),
-				);
-			const spokeRegisterActions = spokeBody.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
-			spokeRegisterActions
-				.createEl("button", { text: "Register with hub", cls: "mod-cta" })
-				.addEventListener("click", async () => {
-					const { spokeHubHost, spokeHubVaultId, spokeHubToken } = this.plugin.settings;
-					if (!spokeHubHost || !spokeHubVaultId || !spokeHubToken) {
-						new Notice("Fill in all hub connection fields before registering.", 6000);
+				const hubActions = hubBody.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
+				hubActions.createEl("button", { text: "Invite a vault" }).addEventListener("click", () => {
+					const { host, vaultId, token } = this.plugin.settings;
+					if (!host || !vaultId || !token) {
+						new Notice("Configure the connection first.", 6000);
 						return;
 					}
+					new SpokeInviteModal(this.app, host, vaultId, token).open();
+				});
+				hubActions.createEl("button", { text: "Refresh" }).addEventListener("click", () => {
+					void this.plugin.fetchHubSpokes().then(renderSpokes);
+				});
+				hubActions.createEl("button", { text: "Stop sharing" }).addEventListener("click", () => {
+					confirmAction(
+						this.app,
+						"Stop sharing",
+						"This vault will stop sharing notes. Connected spokes will no longer receive updates.",
+						async () => {
+							this.plugin.settings.syncMode = isSpoke ? "spoke" : "standalone";
+							await this.plugin.saveSettings();
+							this.display();
+						},
+					);
+				});
+			}
+		}
+
+		// ── Section 3: Follow a Hub (Spoke role) ──────────────────────────────
+		if (!setupIncomplete) {
+			const followDetails = createDetailsSection(containerEl, "Follow a Hub", isSpoke);
+			const followBody = followDetails.createDiv({ cls: "yaos-settings-details-body" });
+
+			if (!isSpoke) {
+				followBody.createEl("p", {
+					text: "Receive shared notes from another vault. Connect using the hub vault's ID — the hub must be on the same host server.",
+					cls: "setting-item-description",
+				});
+				new Setting(followBody)
+					.setName("Hub vault ID")
+					.setDesc("Get this from the hub vault's invite link.")
+					.addText((text) =>
+						text
+							.setPlaceholder("Paste hub vault ID")
+							.setValue(this.plugin.settings.spokeHubVaultId)
+							.onChange(async (value) => {
+								this.plugin.settings.spokeHubVaultId = value.trim();
+								await this.plugin.saveSettings();
+							}),
+					);
+				followBody
+					.createDiv({ cls: "modal-button-container yaos-settings-status-actions" })
+					.createEl("button", { text: "Connect to hub", cls: "mod-cta" })
+					.addEventListener("click", async () => {
+						const { spokeHubVaultId, host, token } = this.plugin.settings;
+						if (!spokeHubVaultId) {
+							new Notice("Enter the hub vault ID first.", 6000);
+							return;
+						}
+						// Spoke connects to the same host — populate spoke fields from existing connection.
+						this.plugin.settings.spokeHubHost = host;
+						this.plugin.settings.spokeHubToken = token;
+						try {
+							await this.plugin.registerWithHub();
+							this.plugin.settings.syncMode = isHub ? "hub+spoke" : "spoke";
+							await this.plugin.saveSettings();
+							new Notice("Connected to hub vault. Hub content will appear shortly.");
+							this.display();
+							this.plugin.restartSync();
+						} catch (err) {
+							new Notice(`Registration failed: ${err instanceof Error ? err.message : String(err)}`, 8000);
+						}
+					});
+			} else {
+				// Spoke connected card
+				const followCard = followBody.createDiv({ cls: "yaos-settings-status-card" });
+				const followLine = followCard.createDiv({ cls: "yaos-settings-status-line" });
+				const followTitleWrap = followLine.createDiv({ cls: "yaos-settings-status-copy" });
+				followTitleWrap.createEl("div", { text: "Following a hub", cls: "yaos-settings-status-title" });
+				followTitleWrap.createEl("div", {
+					text: "This vault is receiving shared notes from a hub vault.",
+					cls: "yaos-settings-status-subtitle",
+				});
+				followLine.createSpan({ text: "Connected", cls: "yaos-settings-status-badge is-connected" });
+
+				addCardRow(followCard, "Hub vault", shortenMiddle(this.plugin.settings.spokeHubVaultId || "(not set)"));
+				addCardRow(followCard, "Host", this.plugin.settings.spokeHubHost || this.plugin.settings.host);
+
+				const followActions = followCard.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
+				followActions.createEl("button", { text: "Re-register" }).addEventListener("click", async () => {
 					try {
-						// Spoke vaults must connect to the hub's worker — always apply hub's host+token.
-						this.plugin.settings.host = spokeHubHost;
-						this.plugin.settings.token = spokeHubToken;
 						await this.plugin.registerWithHub();
-						this.plugin.settings.syncMode = "spoke";
-						await this.plugin.saveSettings();
-						new Notice("Successfully registered with hub. Hub content will appear shortly.");
-						this.display();
-						this.plugin.restartSync();
+						new Notice("Re-registered with hub.");
+						this.plugin.maybeStartSync();
 					} catch (err) {
-						new Notice(`Registration failed: ${err instanceof Error ? err.message : String(err)}`, 8000);
+						new Notice(`Re-registration failed: ${err instanceof Error ? err.message : String(err)}`, 8000);
 					}
 				});
+				followActions.createEl("button", { text: "Disconnect" }).addEventListener("click", async () => {
+					try {
+						await this.plugin.disconnectFromHub();
+					} catch (err) {
+						new Notice(`Disconnect failed: ${err instanceof Error ? err.message : String(err)}`, 6000);
+						return;
+					}
+					this.display();
+				});
+			}
 		}
 
 		// ── Updates ───────────────────────────────────────────────────────────
@@ -747,10 +761,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				: updateState.pluginUpdateRecommended
 					? "This device should update the YAOS plugin soon."
 					: "Server is up to date.";
-			updateCard.createEl("p", {
-				text: summaryText,
-				cls: "yaos-settings-status-subtitle",
-			});
+			updateCard.createEl("p", { text: summaryText, cls: "yaos-settings-status-subtitle" });
 			if (!updateState.updateRepoUrl) {
 				updateCard.createEl("p", {
 					text: "Set a deployment repo URL in Advanced to enable plugin update tracking.",
@@ -778,9 +789,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			});
 			const updateActionUrl = updateState.updateActionUrl;
 			if (updateActionUrl) {
-				updateActions.createEl("button", {
-					text: "Open update action",
-				}).addEventListener("click", () => {
+				updateActions.createEl("button", { text: "Open update action" }).addEventListener("click", () => {
 					window.open(updateActionUrl, "_blank", "noopener");
 				});
 			}
@@ -820,105 +829,106 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		if (this.plugin.settings.syncMode !== "spoke") {
-		addSectionHeading(containerEl, "Sync filters");
-		new Setting(containerEl)
-			.setName("Folders to sync")
-			.setDesc("Only sync files inside these folders. Separate multiple folders with commas. Leave empty to sync everything. Example: Projects/Shared/, Team Notes/")
-			.addText((text) =>
-				text
-					.setPlaceholder("Example: Projects/Shared/, Team Notes/")
-					.setValue(this.plugin.settings.includePaths)
-					.onChange(async (value) => {
-						this.plugin.settings.includePaths = value;
-						await this.plugin.saveSettings();
-						this.plugin.onSettingsChanged();
-					}),
-			)
-			.addButton((btn) =>
-				btn
-					.setButtonText("Add folder")
-					.onClick(() => {
-						new FolderPickerModal(this.app, async (folder) => {
-							this.plugin.settings.includePaths = appendFolderPath(
-								this.plugin.settings.includePaths,
-								folder.path,
-							);
+		// ── Sync filters ──────────────────────────────────────────────────────
+		if (!isSpoke) {
+			addSectionHeading(containerEl, "Sync filters");
+			new Setting(containerEl)
+				.setName("Folders to sync")
+				.setDesc("Only sync files inside these folders. Separate multiple folders with commas. Leave empty to sync everything. Example: Projects/Shared/, Team Notes/")
+				.addText((text) =>
+					text
+						.setPlaceholder("Example: Projects/Shared/, Team Notes/")
+						.setValue(this.plugin.settings.includePaths)
+						.onChange(async (value) => {
+							this.plugin.settings.includePaths = value;
 							await this.plugin.saveSettings();
 							this.plugin.onSettingsChanged();
-							this.display();
-						}).open();
-					}),
-			);
+						}),
+				)
+				.addButton((btn) =>
+					btn
+						.setButtonText("Add folder")
+						.onClick(() => {
+							new FolderPickerModal(this.app, async (folder) => {
+								this.plugin.settings.includePaths = appendFolderPath(
+									this.plugin.settings.includePaths,
+									folder.path,
+								);
+								await this.plugin.saveSettings();
+								this.plugin.onSettingsChanged();
+								this.display();
+							}).open();
+						}),
+				);
 
-		new Setting(containerEl)
-			.setName("Excluded paths")
-			.setDesc("Paths to skip, separated by commas. Example: templates/, .trash/, daily-notes/")
-			.addText((text) =>
-				text
-					.setPlaceholder("Example: templates/, daily-notes/")
-					.setValue(this.plugin.settings.excludePatterns)
-					.onChange(async (value) => {
-						this.plugin.settings.excludePatterns = value;
-						await this.plugin.saveSettings();
-						this.plugin.onSettingsChanged();
-					}),
-			)
-			.addButton((btn) =>
-				btn
-					.setButtonText("Add folder")
-					.onClick(() => {
-						new FolderPickerModal(this.app, async (folder) => {
-							this.plugin.settings.excludePatterns = appendFolderPath(
-								this.plugin.settings.excludePatterns,
-								folder.path,
-							);
+			new Setting(containerEl)
+				.setName("Excluded paths")
+				.setDesc("Paths to skip, separated by commas. Example: templates/, .trash/, daily-notes/")
+				.addText((text) =>
+					text
+						.setPlaceholder("Example: templates/, daily-notes/")
+						.setValue(this.plugin.settings.excludePatterns)
+						.onChange(async (value) => {
+							this.plugin.settings.excludePatterns = value;
 							await this.plugin.saveSettings();
 							this.plugin.onSettingsChanged();
-							this.display();
-						}).open();
-					}),
-			);
+						}),
+				)
+				.addButton((btn) =>
+					btn
+						.setButtonText("Add folder")
+						.onClick(() => {
+							new FolderPickerModal(this.app, async (folder) => {
+								this.plugin.settings.excludePatterns = appendFolderPath(
+									this.plugin.settings.excludePatterns,
+									folder.path,
+								);
+								await this.plugin.saveSettings();
+								this.plugin.onSettingsChanged();
+								this.display();
+							}).open();
+						}),
+				);
 
-		new Setting(containerEl)
-			.setName("Max note size (KB)")
-			.setDesc("Notes larger than this are skipped.")
-			.addText((text) =>
-				text
-					.setPlaceholder("2048")
-					.setValue(String(this.plugin.settings.maxFileSizeKB))
-					.onChange(async (value) => {
-						const n = parseInt(value, 10);
-						if (!isNaN(n) && n > 0) {
-							this.plugin.settings.maxFileSizeKB = n;
-							await this.plugin.saveSettings();
-							this.plugin.onSettingsChanged();
-						}
-					}),
-		);
+			new Setting(containerEl)
+				.setName("Max note size (KB)")
+				.setDesc("Notes larger than this are skipped.")
+				.addText((text) =>
+					text
+						.setPlaceholder("2048")
+						.setValue(String(this.plugin.settings.maxFileSizeKB))
+						.onChange(async (value) => {
+							const n = parseInt(value, 10);
+							if (!isNaN(n) && n > 0) {
+								this.plugin.settings.maxFileSizeKB = n;
+								await this.plugin.saveSettings();
+								this.plugin.onSettingsChanged();
+							}
+						}),
+				);
+		}
 
-		} // end syncMode !== "spoke" (Sync filters)
-
-		if (!setupIncomplete && this.plugin.settings.syncMode !== "spoke") {
+		// ── Attachments ───────────────────────────────────────────────────────
+		if (!setupIncomplete && !isSpoke) {
 			addSectionHeading(containerEl, "Attachments");
 
 			new Setting(containerEl)
 				.setName("Attachment storage")
 				.setDesc(
 					attachmentsAvailable
-						? "Available on this server. The plugin can sync attachments and snapshots."
-						: "Not available on this server. Add object storage in Cloudflare, then redeploy.",
+						? "Available on this host. The plugin can sync attachments and snapshots."
+						: "Not available on this host. Add object storage in Cloudflare, then redeploy.",
 				)
 				.addButton((button) =>
 					button
-					.setButtonText("Refresh")
-					.onClick(async () => {
-						button.setDisabled(true);
-						await this.plugin.refreshServerCapabilities();
-						await this.plugin.refreshAttachmentSyncRuntime("capability-refresh");
-						this.display();
-					}),
-			);
+						.setButtonText("Refresh")
+						.onClick(async () => {
+							button.setDisabled(true);
+							await this.plugin.refreshServerCapabilities();
+							await this.plugin.refreshAttachmentSyncRuntime("capability-refresh");
+							this.display();
+						}),
+				);
 
 			if (!attachmentsAvailable) {
 				const noR2Note = containerEl.createDiv({ cls: "yaos-settings-attachment-callout" });
@@ -935,9 +945,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			if (attachmentsAvailable) {
 				new Setting(containerEl)
 					.setName("Sync attachments")
-					.setDesc(
-						"Sync images, PDF files, and other attachments through object storage. This is enabled by default when the server supports it.",
-					)
+					.setDesc("Sync images, PDF files, and other attachments through object storage. This is enabled by default when the host supports it.")
 					.addToggle((toggle) =>
 						toggle
 							.setValue(this.plugin.settings.enableAttachmentSync)
@@ -984,104 +992,55 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			}
 		}
 
-		const manualDetails = createDetailsSection(containerEl, "Manual connection", setupIncomplete);
-		const manualBody = manualDetails.createDiv({ cls: "yaos-settings-details-body" });
-				if (setupIncomplete) {
-					manualBody.createEl("p", {
-						text: "Claim your server in the browser, then use the setup link. You can also enter the connection details manually here.",
-							cls: "yaos-settings-details-intro",
-						});
-					}
-
-				new Setting(manualBody)
-					.setName("Server URL")
-					.setDesc("Your server URL. This is usually filled in automatically by the setup flow.")
-					.addText((text) =>
-						text
-							.setPlaceholder("Paste the server URL")
-							.setValue(this.plugin.settings.host)
-						.onChange(async (value) => {
-							this.plugin.settings.host = value.trim();
-						await this.plugin.saveSettings();
-						this.display();
-					}),
-			);
-
-			if (isInsecureRemoteHost(this.plugin.settings.host)) {
-				manualBody.createEl("p", {
-					text: "This remote connection is unencrypted. Your sync token will be sent in plaintext. Use HTTPS for production.",
-					cls: "yaos-settings-security-warning",
-				});
-			}
-
-			new Setting(manualBody)
-				.setName("Sync token")
-				.setDesc(
-					authMode === "unclaimed"
-						? "Leave this blank until you claim the server in a browser, then use the setup link."
-						: authMode === "env"
-							? "Must match the SYNC_TOKEN configured on the server."
-							: "This is usually filled in automatically by the setup link after you claim the server.",
-				)
-				.addText((text) =>
-					text
-						.setPlaceholder("Paste your sync token")
-						.setValue(this.plugin.settings.token)
-						.onChange(async (value) => {
-							this.plugin.settings.token = value.trim();
-						await this.plugin.saveSettings();
-						this.display();
-					}),
-			);
-
+		// ── Advanced ──────────────────────────────────────────────────────────
 		const advancedDetails = createDetailsSection(containerEl, "Advanced", false);
 		const advancedBody = advancedDetails.createDiv({ cls: "yaos-settings-details-body" });
 
-			new Setting(advancedBody)
-				.setName("Vault ID")
-				.setDesc("Devices syncing the same vault must use exactly the same vault ID. Change only if you know what you are doing.")
-				.addText((text) =>
-					text
-						.setPlaceholder("Generated automatically")
-						.setValue(this.plugin.settings.vaultId)
-						.onChange(async (value) => {
-							this.plugin.settings.vaultId = value.trim();
+		new Setting(advancedBody)
+			.setName("Vault ID")
+			.setDesc("Devices syncing the same vault must use exactly the same vault ID. Change only if you know what you are doing.")
+			.addText((text) =>
+				text
+					.setPlaceholder("Generated automatically")
+					.setValue(this.plugin.settings.vaultId)
+					.onChange(async (value) => {
+						this.plugin.settings.vaultId = value.trim();
 						await this.plugin.saveSettings();
 					}),
 			);
 
-			new Setting(advancedBody)
-				.setName("Deployment repo URL")
-				.setDesc("Optional. Example: https://github.com/you/yaos-server. Provider is inferred from this URL.")
-				.addText((text) =>
-					text
-						.setPlaceholder("Paste the generated GitHub or GitLab repo URL")
-						.setValue(this.plugin.settings.updateRepoUrl)
-						.onChange(async (value) => {
-							this.plugin.settings.updateRepoUrl = value.trim();
-							await this.plugin.saveSettings();
-						}),
-				);
+		new Setting(advancedBody)
+			.setName("Deployment repo URL")
+			.setDesc("Optional. Example: https://github.com/you/yaos-server. Provider is inferred from this URL.")
+			.addText((text) =>
+				text
+					.setPlaceholder("Paste the generated GitHub or GitLab repo URL")
+					.setValue(this.plugin.settings.updateRepoUrl)
+					.onChange(async (value) => {
+						this.plugin.settings.updateRepoUrl = value.trim();
+						await this.plugin.saveSettings();
+					}),
+			);
 
-			new Setting(advancedBody)
-				.setName("Deployment default branch")
-				.setDesc("Used for GitLab pipeline links and future provider-native update helpers.")
-				.addText((text) =>
-						text
-							.setPlaceholder("Default branch (for example, main)")
-							.setValue(this.plugin.settings.updateRepoBranch)
-						.onChange(async (value) => {
-							this.plugin.settings.updateRepoBranch = value.trim() || "main";
-							await this.plugin.saveSettings();
-						}),
-				);
+		new Setting(advancedBody)
+			.setName("Deployment default branch")
+			.setDesc("Used for GitLab pipeline links and future provider-native update helpers.")
+			.addText((text) =>
+				text
+					.setPlaceholder("Default branch (for example, main)")
+					.setValue(this.plugin.settings.updateRepoBranch)
+					.onChange(async (value) => {
+						this.plugin.settings.updateRepoBranch = value.trim() || "main";
+						await this.plugin.saveSettings();
+					}),
+			);
 
-			new Setting(advancedBody)
-				.setName("Edits from other apps")
-				.setDesc("Choose how the plugin handles file changes from Git, scripts, or other editors.")
-				.addDropdown((dropdown) =>
-					dropdown
-						.addOption("always", "Always import")
+		new Setting(advancedBody)
+			.setName("Edits from other apps")
+			.setDesc("Choose how the plugin handles file changes from Git, scripts, or other editors.")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("always", "Always import")
 					.addOption("closed-only", "Only when file is closed")
 					.addOption("never", "Never import")
 					.setValue(this.plugin.settings.externalEditPolicy)
@@ -1114,10 +1073,48 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}),
 			);
+	}
 
-			advancedBody.createEl("p", {
-				text: "Changing the server URL, sync token, or vault ID requires reloading the plugin.",
-				cls: "setting-item-description",
+	private renderConnectionFields(containerEl: HTMLElement, authMode: string): void {
+		new Setting(containerEl)
+			.setName("Host URL")
+			.setDesc("Your Cloudflare Worker URL. Usually filled in automatically by the setup link.")
+			.addText((text) =>
+				text
+					.setPlaceholder("Paste the host URL")
+					.setValue(this.plugin.settings.host)
+					.onChange(async (value) => {
+						this.plugin.settings.host = value.trim();
+						await this.plugin.saveSettings();
+						this.display();
+					}),
+			);
+
+		if (isInsecureRemoteHost(this.plugin.settings.host)) {
+			containerEl.createEl("p", {
+				text: "This remote connection is unencrypted. Your sync token will be sent in plaintext. Use HTTPS for production.",
+				cls: "yaos-settings-security-warning",
 			});
+		}
+
+		new Setting(containerEl)
+			.setName("Sync token")
+			.setDesc(
+				authMode === "unclaimed"
+					? "Leave this blank until you claim the server in a browser, then use the setup link."
+					: authMode === "env"
+						? "Must match the SYNC_TOKEN configured on the server."
+						: "Usually filled in automatically by the setup link after you claim the server.",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("Paste your sync token")
+					.setValue(this.plugin.settings.token)
+					.onChange(async (value) => {
+						this.plugin.settings.token = value.trim();
+						await this.plugin.saveSettings();
+						this.display();
+					}),
+			);
 	}
 }

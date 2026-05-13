@@ -3132,7 +3132,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		this.settings.spokeHubHost = "";
 		this.settings.spokeHubVaultId = "";
 		this.settings.spokeHubToken = "";
-		this.settings.syncMode = "standalone";
+		// hub+spoke → hub; spoke → standalone
+		this.settings.syncMode = this.settings.syncMode === "hub+spoke" ? "hub" : "standalone";
 		await this.saveSettings();
 	}
 
@@ -3823,22 +3824,41 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const hubVaultId = typeof params.hubVaultId === "string" ? params.hubVaultId.trim() : "";
 		const token = typeof params.token === "string" ? params.token.trim() : "";
 
-		if (!host || !hubVaultId || !token) {
-			new Notice("Spoke invite link is incomplete — missing host, hub vault ID, or token.", 7000);
+		if (!hubVaultId) {
+			new Notice("Spoke invite link is missing the hub vault ID.", 7000);
 			return;
 		}
 
-		this.settings.spokeHubHost = host;
+		// Only apply host+token from the invite if this vault has no server connection yet.
+		// Hub and spoke vaults share the same Cloudflare Worker — an existing connection is reused.
+		let restartNeeded = false;
+		if (!this.settings.host || !this.settings.token) {
+			if (!host || !token) {
+				new Notice("Spoke invite link is missing host or token, and this vault has no server connection configured.", 7000);
+				return;
+			}
+			this.settings.host = host;
+			this.settings.token = token;
+			restartNeeded = true;
+		} else if (host && this.settings.host !== host) {
+			new Notice(
+				"This invite is for a different host server. Your existing connection was kept. Connect to the hub's host first if needed.",
+				10000,
+			);
+		}
+
+		// Always populate spoke fields from the current host connection.
+		this.settings.spokeHubHost = this.settings.host;
 		this.settings.spokeHubVaultId = hubVaultId;
-		this.settings.spokeHubToken = token;
-		// Spoke vaults must connect to the hub's Cloudflare worker — always apply hub's host+token.
-		this.settings.host = host;
-		this.settings.token = token;
+		this.settings.spokeHubToken = this.settings.token;
 		await this.saveSettings();
+
+		const currentMode = this.settings.syncMode;
+		const newMode = (currentMode === "hub" || currentMode === "hub+spoke") ? "hub+spoke" : "spoke";
 
 		try {
 			await this.registerWithHub();
-			this.settings.syncMode = "spoke";
+			this.settings.syncMode = newMode;
 			await this.saveSettings();
 			new Notice("Connected to hub vault. Hub content will appear shortly.", 6000);
 		} catch (err) {
@@ -3848,9 +3868,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			);
 		}
 		this.settingTab?.display();
-		// Always restart sync so the updated host+token take effect.
-		this.teardownSync();
-		void this.initSync();
+		if (restartNeeded) {
+			this.teardownSync();
+			void this.initSync();
+		}
 	}
 
 	private async handleSetupLink(params: Record<string, string>): Promise<void> {
