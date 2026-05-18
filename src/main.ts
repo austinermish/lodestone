@@ -1373,6 +1373,15 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		// Notify disk mirror for the newly opened file
 		if (!this.openFilePaths.has(path)) {
 			this.diskMirror?.notifyFileOpened(path);
+			// Notify room DiskMirrors — they need open-path tracking to use
+			// scheduleOpenWrite (deferred) instead of the 300ms closed debounce.
+			// For a spoke with a folder alias, translate local disk path to CRDT path.
+			for (const room of this.settings.rooms) {
+				const roomMirror = this.roomDiskMirrors.get(room.roomId);
+				if (!roomMirror) continue;
+				const crdtPath = applyReverseAlias(path, room.pathAliases ?? {});
+				roomMirror.notifyFileOpened(crdtPath);
+			}
 			this.openFilePaths.add(path);
 		}
 
@@ -1393,6 +1402,12 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		for (const tracked of this.openFilePaths) {
 			if (!currentlyOpen.has(tracked)) {
 				this.diskMirror?.notifyFileClosed(tracked);
+				for (const room of this.settings.rooms) {
+					const roomMirror = this.roomDiskMirrors.get(room.roomId);
+					if (!roomMirror) continue;
+					const crdtPath = applyReverseAlias(tracked, room.pathAliases ?? {});
+					roomMirror.notifyFileClosed(crdtPath);
+				}
 				this.openFilePaths.delete(tracked);
 				this.log(`${reason}: closed observer for "${tracked}"`);
 				this.maybeImportDeferredClosedOnlyPath(tracked, reason);
@@ -3396,6 +3411,12 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 
 		// Seed the room Y.Doc with hub files and rebind any open editors.
 		void this.seedRoomAndRebindEditors(room, roomSync);
+
+		// After every reconnect, rebind open editors so yCollab attaches to the
+		// freshly-synced Y.Text objects rather than any pre-sync stubs.
+		roomSync.onProviderSync(() => {
+			if (this.reconciled) this.bindAllOpenEditors();
+		});
 	}
 
 	/** Stop and destroy a room's sync subsystems. */
@@ -3465,7 +3486,15 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	 */
 	private async seedRoomAndRebindEditors(room: RoomConfig, roomSync: VaultSync): Promise<void> {
 		if (room.role === "hub" && room.includePaths.length > 0) {
+			// seedRoomFromDisk already awaits waitForProviderSync internally.
 			await this.seedRoomFromDisk(room, roomSync);
+		} else if (room.role === "spoke") {
+			// Wait for the initial sync so the room Y.Doc has the hub's Y.Text
+			// objects before we bind editors. Without this, resolveBindingTarget
+			// calls ensureFile and creates a local stub Y.Text; when the hub's
+			// Y.Text arrives via CRDT merge the binding becomes stale and text
+			// changes no longer apply to the editor in real-time.
+			await roomSync.waitForProviderSync();
 		}
 		// Rebind open editors so files in shared folders use the room binding.
 		if (this.reconciled) {

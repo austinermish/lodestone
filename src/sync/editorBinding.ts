@@ -273,7 +273,7 @@ export class EditorBindingManager {
 			`repair:${reason}`,
 		);
 		if (!target) {
-			return this.isHardTombstonedPath(file.path);
+			return this.isHardTombstonedPath(this.pathToCrdt(file.path));
 		}
 
 		return this.applyBinding({
@@ -303,7 +303,7 @@ export class EditorBindingManager {
 			`heal:${reason}`,
 		);
 		if (!target) {
-			return this.isHardTombstonedPath(file.path);
+			return this.isHardTombstonedPath(this.pathToCrdt(file.path));
 		}
 
 		const currentContent = view.editor.getValue();
