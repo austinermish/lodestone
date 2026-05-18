@@ -2209,6 +2209,16 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				this.log(`syncFileFromDisk: skipping room file "${file.path}" (size limit)`);
 				return;
 			}
+
+			// If the file is open and the room editor binding is active, yCollab owns
+			// the Y.Text — applying stale disk content would delete in-flight characters.
+			const roomMgr = this.getBindingManagerForFile(file.path);
+			if (roomMgr && roomMgr !== this.editorBindings && roomMgr.isBound(file.path)) {
+				this.log(`syncFileFromDisk: skipping room file "${file.path}" (editor-bound)`);
+				await this.updateDiskIndexForPath(file.path);
+				return;
+			}
+
 			const existingText = vaultSync.getTextForPath(crdtPath);
 			if (existingText) {
 				const crdtContent = existingText.toJSON();
