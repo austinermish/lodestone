@@ -346,6 +346,35 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		return isBlobSyncable(path, this.excludePatterns, this.includePaths, this.app.vault.configDir);
 	}
 
+	/**
+	 * Returns true if the local disk path is managed by a room sync rather than
+	 * the main vault sync. Room-managed files must be excluded from main-vault
+	 * reconciliation to prevent the main DiskMirror from overwriting room
+	 * DiskMirror writes with stale main-CRDT content.
+	 *
+	 * For hub: any path under a room's includePaths is room-managed (static).
+	 * For spoke: a path is room-managed if its reverse-aliased CRDT form exists
+	 *   in the room Y.Doc. Requires the room to be started (room Y.Doc populated).
+	 */
+	private isRoomManagedPath(localPath: string): boolean {
+		for (const room of this.settings.rooms) {
+			if (room.role === "hub") {
+				if (room.includePaths.some((p) => {
+					if (!p) return false;
+					const prefix = p.endsWith("/") ? p : p + "/";
+					return localPath === p || localPath.startsWith(prefix);
+				})) return true;
+			} else {
+				const roomSync = this.roomSyncs.get(room.roomId);
+				if (!roomSync) continue;
+				const aliases = room.pathAliases ?? {};
+				const crdtPath = applyReverseAlias(localPath, aliases);
+				if (roomSync.getTextForPath(crdtPath)) return true;
+			}
+		}
+		return false;
+	}
+
 	/** Called by the settings tab whenever a setting changes that affects derived state. */
 	maybeStartSync(): void {
 		if (!this.vaultSync) {
@@ -964,6 +993,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					excludedCount++;
 					continue;
 				}
+				// Room-managed files are handled by room syncs, not main vault.
+				// Excluding them prevents the main DiskMirror from overwriting
+				// room DiskMirror writes with stale main-CRDT content.
+				if (this.isRoomManagedPath(file.path)) continue;
 				eligibleFiles.push(file);
 				diskPresentPaths.add(file.path);
 			}
@@ -1091,12 +1124,18 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 
 				for (const path of result.createdOnDisk) {
 					if (!this.isMarkdownPathSyncable(path)) continue;
+					// Skip room-managed paths — they may exist in main CRDT from
+					// previous seeding but are owned by room DiskMirror on disk.
+					if (this.isRoomManagedPath(path)) continue;
 					await this.diskMirror.flushWrite(path);
 					flushedCreates++;
 				}
 				if (!safetyBrakeTriggered) {
 					for (const path of result.updatedOnDisk) {
 						if (!this.isMarkdownPathSyncable(path)) continue;
+						// Never let stale main-CRDT content overwrite a room file
+						// that room DiskMirror has already written at a newer state.
+						if (this.isRoomManagedPath(path)) continue;
 						await this.diskMirror.flushWrite(path);
 						flushedUpdates++;
 					}
@@ -1129,6 +1168,24 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					`Integrity: ${integrity.duplicateIds} duplicate IDs fixed, ` +
 					`${integrity.orphansCleaned} orphans cleaned`,
 				);
+			}
+
+			// Clean up room-managed files that were previously seeded into main CRDT.
+			// Only runs when room syncs are active so isRoomManagedPath is accurate.
+			// Tombstoning here prevents future reconcile passes from trying to restore
+			// these paths to disk from stale main-CRDT state.
+			if (this.roomSyncs.size > 0) {
+				const activePaths = this.vaultSync.getActiveMarkdownPaths();
+				let roomCleaned = 0;
+				for (const path of activePaths) {
+					if (this.isRoomManagedPath(path)) {
+						this.vaultSync.handleDelete(path, this.settings.deviceName);
+						roomCleaned++;
+					}
+				}
+				if (roomCleaned > 0) {
+					this.log(`reconcile: tombstoned ${roomCleaned} stale room file(s) from main CRDT`);
+				}
 			}
 
 				this.log(
@@ -1582,8 +1639,17 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	private teardownSync(): void {
 		this.log("teardownSync: tearing down all sync state");
 
-		// Stop all room syncs first (fire-and-forget — teardown is sync).
-		void this.stopAllRooms();
+		// Stop all room syncs synchronously before main sync teardown.
+		// stopRoomSync has no awaits so this is equivalent to the async version
+		// but guaranteed to complete before continuing.
+		for (const roomId of [...this.roomSyncs.keys()]) {
+			this.roomEditorBindings.get(roomId)?.unbindAll();
+			this.roomEditorBindings.delete(roomId);
+			this.roomDiskMirrors.get(roomId)?.destroy();
+			this.roomDiskMirrors.delete(roomId);
+			this.roomSyncs.get(roomId)?.destroy();
+			this.roomSyncs.delete(roomId);
+		}
 
 		this.editorBindings?.unbindAll();
 		this.diskMirror?.destroy();
