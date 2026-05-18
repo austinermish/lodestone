@@ -2,7 +2,7 @@ stages:
   - yaos
 
 variables:
-  YAOS_RELEASE_REPO: "kavinsood/yaos"
+  YAOS_RELEASE_REPO: "Opkalla/yaos"
 
 default:
   image: node:20

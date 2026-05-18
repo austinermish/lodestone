@@ -6,7 +6,7 @@ Your notes stay in sync instantly across devices, without conflicted copies, del
 
 <img src="https://github.com/user-attachments/assets/ee937050-8a05-4d56-9c5f-3ae5003496fc" alt="YAOS syncing a note across desktop and mobile in real time" width="720" />
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/kavinsood/yaos/tree/main/server)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Opkalla/yaos/tree/main/server)
 
 [![License: 0-BSD](https://img.shields.io/badge/license-0--BSD-green)](LICENSE)
 
@@ -43,7 +43,7 @@ Click **Deploy to Cloudflare** above. Cloudflare creates a Worker in your accoun
 Open the Worker URL. Click **Claim** to lock the server to you and generate your setup token.
 
 **3. Install the plugin**
-YAOS is in the Obsidian Marketplace review queue. To install today, add it through [BRAT](https://github.com/TfTHacker/obsidian42-brat): open BRAT settings → **Add Beta plugin** → paste `kavinsood/yaos`.
+YAOS is in the Obsidian Marketplace review queue. To install today, add it through [BRAT](https://github.com/TfTHacker/obsidian42-brat): open BRAT settings → **Add Beta plugin** → paste `Opkalla/yaos`.
 
 **4. Connect your vault**
 From the claim page, open the setup link or scan the QR code. YAOS fills in the connection details automatically.

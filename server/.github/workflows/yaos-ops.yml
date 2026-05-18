@@ -18,7 +18,7 @@ on:
       release_repo:
         description: "Optional owner/repo to pull releases from"
         required: false
-        default: "kavinsood/yaos"
+        default: "Opkalla/yaos"
         type: string
 
 permissions:
@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   run:
-    uses: kavinsood/yaos/.github/workflows/yaos-ops-reusable.yml@main
+    uses: Opkalla/yaos/.github/workflows/yaos-ops-reusable.yml@main
     with:
       action: ${{ github.event.inputs.action }}
       version: ${{ github.event.inputs.version }}

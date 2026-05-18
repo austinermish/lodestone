@@ -4,7 +4,7 @@
 	"version": "2.5.3",
 	"minAppVersion": "1.5.0",
 	"description": "A zero-terminal, real-time sync engine powered by your own Cloudflare Worker.",
-	"author": "Kavin",
-	"authorUrl": "https://github.com/kavinsood",
+	"author": "Opkalla",
+	"authorUrl": "https://github.com/Opkalla",
 	"isDesktopOnly": false
 }
