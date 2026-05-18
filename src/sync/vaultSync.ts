@@ -1448,6 +1448,7 @@ export class VaultSync {
 		this.log("Destroying VaultSync");
 		if (this._renameTimer) clearTimeout(this._renameTimer);
 		this.clearPendingRenames();
+		this.provider.disconnect();
 		this.provider.destroy();
 		void this.persistence.destroy();
 		this.ydoc.destroy();

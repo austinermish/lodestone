@@ -3254,6 +3254,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	/** Leave a room — stops its sync and removes it from settings. */
 	async leaveRoom(roomId: string): Promise<void> {
 		await this.stopRoomSync(roomId);
+		await VaultSync.deleteIdb(roomId);
 		this.settings.rooms = this.settings.rooms.filter((r) => r.roomId !== roomId);
 		await this.saveSettings();
 	}
