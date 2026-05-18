@@ -362,6 +362,14 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		void this.initSync();
 	}
 
+	/**
+	 * Tear down sync without restarting. Used when the user clears server
+	 * credentials — leaves the plugin idle until new credentials are provided.
+	 */
+	disconnectSync(): void {
+		this.teardownSync();
+	}
+
 	onSettingsChanged(): void {
 		this.excludePatterns = parseExcludePatterns(this.settings.excludePatterns);
 		this.includePaths = parseIncludePaths(this.settings.includePaths);

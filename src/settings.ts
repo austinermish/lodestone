@@ -822,6 +822,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					"Reset connection",
 					"This clears your host URL, token, and vault ID from this device. Your server data is not deleted. You can use the setup link to reconnect.",
 					async () => {
+						this.plugin.disconnectSync();
 						this.plugin.settings.host = "";
 						this.plugin.settings.token = "";
 						this.plugin.settings.vaultId = "";
@@ -1208,7 +1209,10 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 	private async maybeBootstrapConnection(): Promise<void> {
 		const { host, token } = this.plugin.settings;
-		if (!host || !token) return;
+		if (!host || !token) {
+			this.plugin.disconnectSync();
+			return;
+		}
 		if (!this.plugin.settings.vaultId) {
 			this.plugin.settings.vaultId = generateVaultId();
 			await this.plugin.saveSettings();
