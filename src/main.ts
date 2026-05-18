@@ -105,6 +105,22 @@ const UPDATE_MANIFEST_URLS = [
 const UPDATE_MANIFEST_CACHE_MS = 24 * 60 * 60 * 1000;
 const GITHUB_OPS_WORKFLOW_PATH = ".github/workflows/yaos-ops.yml";
 
+/** Apply a spoke pathAliases map to a CRDT-side path, yielding the local disk path. */
+function applyAlias(crdtPath: string, aliases: Record<string, string>): string {
+	for (const [from, to] of Object.entries(aliases)) {
+		if (crdtPath.startsWith(from)) return to + crdtPath.slice(from.length);
+	}
+	return crdtPath;
+}
+
+/** Reverse a spoke pathAliases map: local disk path → CRDT-side path. */
+function applyReverseAlias(localPath: string, aliases: Record<string, string>): string {
+	for (const [from, to] of Object.entries(aliases)) {
+		if (localPath.startsWith(to)) return from + localPath.slice(to.length);
+	}
+	return localPath;
+}
+
 function buildGithubOpsBootstrapWorkflowYaml(): string {
 	return [
 		"name: YAOS Server Ops",
@@ -1194,11 +1210,18 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	 */
 	private getBindingManagerForFile(filePath: string): EditorBindingManager | null {
 		for (const room of this.settings.rooms) {
-			if (room.role !== "hub") continue;
-			if (room.includePaths.length === 0) continue;
 			const mgr = this.roomEditorBindings.get(room.roomId);
 			if (!mgr) continue;
-			if (room.includePaths.some((p) => filePath.startsWith(p))) return mgr;
+			if (room.role === "hub") {
+				if (room.includePaths.length === 0) continue;
+				if (room.includePaths.some((p) => filePath.startsWith(p))) return mgr;
+			} else if (room.role === "spoke") {
+				// Translate local path to CRDT path (reverses any folder alias) before
+				// checking the room Y.Doc — the Y.Doc always stores hub-side paths.
+				const roomSync = this.roomSyncs.get(room.roomId);
+				const crdtPath = applyReverseAlias(filePath, room.pathAliases ?? {});
+				if (roomSync?.getTextForPath(crdtPath)) return mgr;
+			}
 		}
 		return this.editorBindings;
 	}
@@ -1444,7 +1467,22 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				const oldSyncable = this.isMarkdownPathSyncable(oldPath)
 					|| this.isBlobPathSyncable(oldPath);
 				if (!newSyncable && !oldSyncable) return;
-				this.vaultSync?.queueRename(oldPath, file.path);
+				// Route rename to the correct VaultSync (room or main vault).
+				const roomResult = this.getRoomSyncAndCrdtPath(file.path)
+					?? this.getRoomSyncAndCrdtPath(oldPath);
+				if (roomResult) {
+					// Find the room config to get aliases for both paths.
+					const matchedRoom = this.settings.rooms.find(
+						(r) => this.roomSyncs.get(r.roomId) === roomResult.roomSync,
+					);
+					const aliases = matchedRoom?.pathAliases ?? {};
+					roomResult.roomSync.queueRename(
+						applyReverseAlias(oldPath, aliases),
+						applyReverseAlias(file.path, aliases),
+					);
+				} else {
+					this.vaultSync?.queueRename(oldPath, file.path);
+				}
 				this.log(`Rename queued: "${oldPath}" -> "${file.path}"`);
 			}),
 		);
@@ -1459,15 +1497,30 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 						this.log(`Suppressed delete event for "${file.path}"`);
 						return;
 					}
+					// Check room DiskMirrors — they suppress their own deletes.
+					let roomDeleteSuppressed = false;
+					for (const roomMirror of this.roomDiskMirrors.values()) {
+						if (roomMirror.consumeDeleteSuppression(file.path)) {
+							roomDeleteSuppressed = true;
+							break;
+						}
+					}
+					if (roomDeleteSuppressed) {
+						this.log(`Suppressed delete event for "${file.path}" (room mirror)`);
+						return;
+					}
 					this.editorBindings?.unbindByPath(file.path);
 					for (const mgr of this.roomEditorBindings.values()) mgr.unbindByPath(file.path);
 					this.diskMirror?.notifyFileClosed(file.path);
 					this.openFilePaths.delete(file.path);
 
-					this.vaultSync?.handleDelete(
-						file.path,
-						this.settings.deviceName,
-					);
+					// Route the delete to the correct VaultSync (room or main vault).
+					const roomResult = this.getRoomSyncAndCrdtPath(file.path);
+					if (roomResult) {
+						roomResult.roomSync.handleDelete(roomResult.crdtPath, this.settings.deviceName);
+					} else {
+						this.vaultSync?.handleDelete(file.path, this.settings.deviceName);
+					}
 					this.log(`Delete: "${file.path}"`);
 				} else if (this.blobSync && this.isBlobPathSyncable(file.path) && !this.blobSync.isSuppressed(file.path)) {
 					this.blobSync.handleFileDelete(file.path, this.settings.deviceName);
@@ -2002,6 +2055,13 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				this.log(`Suppressed create event for "${path}"`);
 				return;
 			}
+			// Also check room disk mirrors — they suppress their own writes.
+			for (const roomMirror of this.roomDiskMirrors.values()) {
+				if (await roomMirror.shouldSuppressCreate(abstractFile)) {
+					this.log(`Suppressed create event for "${path}" (room mirror)`);
+					return;
+				}
+			}
 
 			if (this.vaultSync?.isPendingRenameTarget(path)) {
 				this.log(`Create: "${path}" is a pending rename target, skipping import`);
@@ -2012,6 +2072,13 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				this.log(`Suppressed modify event for "${path}"`);
 				return;
 			}
+			// Also check room disk mirrors — they suppress their own writes.
+			for (const roomMirror of this.roomDiskMirrors.values()) {
+				if (await roomMirror.shouldSuppressModify(abstractFile)) {
+					this.log(`Suppressed modify event for "${path}" (room mirror)`);
+					return;
+				}
+			}
 		}
 
 		await this.syncFileFromDisk(abstractFile, reason);
@@ -2021,108 +2088,138 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		file: TFile,
 		sourceReason: "create" | "modify" = "modify",
 	): Promise<void> {
-		if (!this.vaultSync) return;
 		if (!this.isMarkdownPathSyncable(file.path)) return;
 
-		let wasBound = this.editorBindings?.isBound(file.path) ?? false;
-		const openViews = this.getOpenMarkdownViewsForPath(file.path);
-		const isOpenInEditor = openViews.length > 0;
-		if (wasBound && !isOpenInEditor) {
-			this.trace("trace", "stale-bound-path-without-open-view", {
-				path: file.path,
-			});
-			this.editorBindings?.unbindByPath(file.path);
-			this.log(`syncFileFromDisk: cleared stale bound state for "${file.path}" (no live view)`);
-			wasBound = false;
-		}
+		// Determine whether this file belongs to a room.  Room files are routed
+		// to the room VaultSync using the CRDT (hub-side) path, which may differ
+		// from the local disk path when a folder alias is configured.
+		const roomResult = this.getRoomSyncAndCrdtPath(file.path);
+		const vaultSync = roomResult?.roomSync ?? this.vaultSync;
+		const crdtPath = roomResult?.crdtPath ?? file.path;
+		if (!vaultSync) return;
 
-		// External edit policy gate: control whether disk changes are
-		// imported into the CRDT.
-		const policy = this.settings.externalEditPolicy;
-		const policyDecision = decideExternalEditImport(policy, isOpenInEditor);
-		if (!policyDecision.allowImport) {
-			const reason = policyDecision.reason === "policy-never"
-				? "external edit policy: never"
-				: "external edit policy: closed-only (file is open; deferred)";
-			this.log(`syncFileFromDisk: skipping "${file.path}" (${reason})`);
-			if (policyDecision.reason === "policy-never") {
+		// For the main vault, respect the editor-bound-file sync-gap logic.
+		// For room files, the room editor binding already handles in-editor changes;
+		// external disk edits are applied directly to the room Y.Doc.
+		if (!roomResult) {
+			let wasBound = this.editorBindings?.isBound(file.path) ?? false;
+			const openViews = this.getOpenMarkdownViewsForPath(file.path);
+			const isOpenInEditor = openViews.length > 0;
+			if (wasBound && !isOpenInEditor) {
+				this.trace("trace", "stale-bound-path-without-open-view", {
+					path: file.path,
+				});
+				this.editorBindings?.unbindByPath(file.path);
+				this.log(`syncFileFromDisk: cleared stale bound state for "${file.path}" (no live view)`);
+				wasBound = false;
+			}
+
+			// External edit policy gate: control whether disk changes are
+			// imported into the CRDT.
+			const policy = this.settings.externalEditPolicy;
+			const policyDecision = decideExternalEditImport(policy, isOpenInEditor);
+			if (!policyDecision.allowImport) {
+				const reason = policyDecision.reason === "policy-never"
+					? "external edit policy: never"
+					: "external edit policy: closed-only (file is open; deferred)";
+				this.log(`syncFileFromDisk: skipping "${file.path}" (${reason})`);
+				if (policyDecision.reason === "policy-never") {
+					await this.updateDiskIndexForPath(file.path);
+				}
+				return;
+			}
+
+			try {
+				const content = await this.app.vault.read(file);
+
+				// File size guard
+				if (this.maxFileSize > 0 && content.length > this.maxFileSize) {
+					this.log(`syncFileFromDisk: skipping "${file.path}" (${Math.round(content.length / 1024)} KB exceeds limit)`);
+					return;
+				}
+				const existingText = vaultSync.getTextForPath(crdtPath);
+
+				if (wasBound && isOpenInEditor) {
+					const handledBound = this.handleBoundFileSyncGap(
+						file,
+						content,
+						existingText,
+						openViews,
+						sourceReason,
+					);
+					if (handledBound) {
+						await this.updateDiskIndexForPath(file.path);
+						return;
+					}
+				}
+
+				if (existingText) {
+					const crdtContent = existingText.toJSON();
+					if (crdtContent === content) return;
+					if (this.shouldBlockFrontmatterIngest(
+						file.path,
+						crdtContent,
+						content,
+						"disk-to-crdt",
+					)) {
+						await this.updateDiskIndexForPath(file.path);
+						return;
+					}
+
+					// Apply a line-level diff to the Y.Text instead of delete-all + insert-all.
+					this.log(
+						`syncFileFromDisk: applying diff to "${file.path}" (${crdtContent.length} -> ${content.length} chars)`,
+					);
+					applyDiffToYText(existingText, content, "disk-sync");
+				} else {
+					if (this.shouldBlockFrontmatterIngest(
+						file.path,
+						null,
+						content,
+						"disk-to-crdt-seed",
+					)) {
+						await this.updateDiskIndexForPath(file.path);
+						return;
+					}
+					vaultSync.ensureFile(
+						crdtPath,
+						content,
+						this.settings.deviceName,
+						{
+							reviveTombstone: sourceReason === "create",
+							reviveReason: sourceReason === "create" ? "local-create-event" : undefined,
+						},
+					);
+				}
+
 				await this.updateDiskIndexForPath(file.path);
+			} catch (err) {
+				console.error(
+					`[yaos] syncFileFromDisk failed for "${file.path}":`,
+					err,
+				);
 			}
 			return;
 		}
 
+		// Room file: apply external disk changes to the room Y.Doc.
 		try {
 			const content = await this.app.vault.read(file);
-
-			// File size guard
 			if (this.maxFileSize > 0 && content.length > this.maxFileSize) {
-				this.log(`syncFileFromDisk: skipping "${file.path}" (${Math.round(content.length / 1024)} KB exceeds limit)`);
+				this.log(`syncFileFromDisk: skipping room file "${file.path}" (size limit)`);
 				return;
 			}
-			const existingText = this.vaultSync.getTextForPath(file.path);
-
-			if (wasBound && isOpenInEditor) {
-				const handledBound = this.handleBoundFileSyncGap(
-					file,
-					content,
-					existingText,
-					openViews,
-					sourceReason,
-				);
-				if (handledBound) {
-					await this.updateDiskIndexForPath(file.path);
-					return;
-				}
-			}
-
+			const existingText = vaultSync.getTextForPath(crdtPath);
 			if (existingText) {
 				const crdtContent = existingText.toJSON();
-				if (crdtContent === content) return;
-				if (this.shouldBlockFrontmatterIngest(
-					file.path,
-					crdtContent,
-					content,
-					"disk-to-crdt",
-				)) {
-					await this.updateDiskIndexForPath(file.path);
-					return;
+				if (crdtContent !== content) {
+					this.log(`syncFileFromDisk: applying diff to room file "${file.path}"`);
+					applyDiffToYText(existingText, content, "disk-sync");
 				}
-
-				// Apply a line-level diff to the Y.Text instead of delete-all + insert-all.
-				// This preserves CRDT history, cursor positions, and awareness state.
-				// Works for both editor-bound files (external edit merges into live editor)
-				// and unbound files (background sync).
-				this.log(
-					`syncFileFromDisk: applying diff to "${file.path}" (${crdtContent.length} -> ${content.length} chars)`,
-				);
-				applyDiffToYText(existingText, content, "disk-sync");
-			} else {
-				if (this.shouldBlockFrontmatterIngest(
-					file.path,
-					null,
-					content,
-					"disk-to-crdt-seed",
-				)) {
-					await this.updateDiskIndexForPath(file.path);
-					return;
-				}
-				this.vaultSync.ensureFile(
-					file.path,
-					content,
-					this.settings.deviceName,
-					{
-						reviveTombstone: sourceReason === "create",
-						reviveReason: sourceReason === "create" ? "local-create-event" : undefined,
-					},
-				);
 			}
-
 			await this.updateDiskIndexForPath(file.path);
 		} catch (err) {
-			console.error(
-				`[yaos] syncFileFromDisk failed for "${file.path}":`,
-				err,
-			);
+			console.error(`[yaos] syncFileFromDisk (room) failed for "${file.path}":`, err);
 		}
 	}
 
@@ -3128,7 +3225,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	}
 
 	/** Join an existing room as spoke. Saves config, starts room sync. */
-	async joinRoom(roomId: string, displayName: string, includePaths: string[]): Promise<void> {
+	async joinRoom(roomId: string, displayName: string, includePaths: string[], pathAliases: Record<string, string> = {}): Promise<void> {
 		if (this.settings.rooms.find((r) => r.roomId === roomId)) {
 			throw new Error("Already in this room.");
 		}
@@ -3137,6 +3234,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			role: "spoke",
 			displayName,
 			includePaths,
+			...(Object.keys(pathAliases).length > 0 ? { pathAliases } : {}),
 		};
 		this.settings.rooms = [...this.settings.rooms, room];
 		await this.saveSettings();
@@ -3181,6 +3279,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		this.registerEditorExtension(roomEditorBindings.getBaseExtension());
 
 		const hubPaths = room.includePaths;
+		// For spoke vaults with a folder alias, translate CRDT paths to local disk paths.
+		const aliases = (!isHub && room.pathAliases && Object.keys(room.pathAliases).length > 0)
+			? room.pathAliases
+			: null;
 		const roomMirror = new DiskMirror(
 			this.app,
 			roomSync,
@@ -3197,6 +3299,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				if (hubPaths.length === 0) return true;
 				return hubPaths.some((prefix) => path.startsWith(prefix));
 			},
+			aliases ? (crdtPath) => applyAlias(crdtPath, aliases) : undefined,
 		);
 		roomMirror.startMapObservers();
 		this.roomDiskMirrors.set(room.roomId, roomMirror);
@@ -3216,6 +3319,31 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		this.roomSyncs.get(roomId)?.destroy();
 		this.roomSyncs.delete(roomId);
 		this.log(`Room sync stopped: ${roomId}`);
+	}
+
+	/**
+	 * Given a local disk path, find the room VaultSync responsible for it and
+	 * return the corresponding CRDT-side path (which may differ when the spoke
+	 * has a pathAlias configured).  Returns null for non-room files.
+	 */
+	private getRoomSyncAndCrdtPath(
+		localPath: string,
+	): { roomSync: VaultSync; crdtPath: string } | null {
+		for (const room of this.settings.rooms) {
+			const roomSync = this.roomSyncs.get(room.roomId);
+			if (!roomSync) continue;
+			if (room.role === "hub") {
+				if (room.includePaths.some((p) => localPath.startsWith(p))) {
+					return { roomSync, crdtPath: localPath };
+				}
+			} else if (room.role === "spoke") {
+				const crdtPath = applyReverseAlias(localPath, room.pathAliases ?? {});
+				if (roomSync.getTextForPath(crdtPath)) {
+					return { roomSync, crdtPath };
+				}
+			}
+		}
+		return null;
 	}
 
 	private async startAllRooms(): Promise<void> {
@@ -3287,7 +3415,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	}
 
 	/** Parse and apply a room invite URL (obsidian://yaos?action=room&…). Called from settings UI. */
-	async handleRoomInviteUrl(rawUrl: string): Promise<void> {
+	async handleRoomInviteUrl(rawUrl: string, pathAliases: Record<string, string> = {}): Promise<void> {
 		let params: URLSearchParams;
 		try {
 			const url = new URL(rawUrl);
@@ -3304,7 +3432,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const token = params.get("token")?.trim() ?? "";
 		const name = params.get("name")?.trim() ?? "Shared room";
 
-		await this.handleRoomJoinParams({ roomId, host, token, name });
+		await this.handleRoomJoinParams({ roomId, host, token, name, pathAliases });
 	}
 
 	/** Internal handler for both protocol URL and settings UI join flows. */
@@ -3313,6 +3441,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		host: string;
 		token: string;
 		name: string;
+		pathAliases?: Record<string, string>;
 	}): Promise<void> {
 		if (!p.roomId) throw new Error("Invite link is missing roomId.");
 
@@ -3334,7 +3463,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		}
 
 		// Spoke joins with no includePaths — the room Y.Doc is already scoped by the hub.
-		await this.joinRoom(p.roomId, p.name, []);
+		await this.joinRoom(p.roomId, p.name, [], p.pathAliases ?? {});
 
 		if (restartNeeded) {
 			this.teardownSync();

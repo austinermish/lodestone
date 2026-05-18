@@ -16,6 +16,12 @@ export interface RoomConfig {
 	displayName: string;
 	/** Folder paths being shared into this room. */
 	includePaths: string[];
+	/**
+	 * For spoke only: maps hub folder prefixes → local folder names.
+	 * e.g. { "Documentation/": "Austin's Notes/" }
+	 * Paths not listed use the hub's original name.
+	 */
+	pathAliases?: Record<string, string>;
 }
 
 export interface VaultSyncSettings {
@@ -603,9 +609,9 @@ class EditRoomModal extends Modal {
 }
 
 class JoinRoomModal extends Modal {
-	private onJoin: (inviteUrl: string) => Promise<void>;
+	private onJoin: (inviteUrl: string, pathAliases: Record<string, string>) => Promise<void>;
 
-	constructor(app: App, onJoin: (inviteUrl: string) => Promise<void>) {
+	constructor(app: App, onJoin: (inviteUrl: string, pathAliases: Record<string, string>) => Promise<void>) {
 		super(app);
 		this.onJoin = onJoin;
 	}
@@ -621,10 +627,51 @@ class JoinRoomModal extends Modal {
 		});
 
 		let inviteUrl = "";
+		let hubPaths: string[] = [];
+		const aliasInputs = new Map<string, HTMLInputElement>();
+
 		const textArea = contentEl.createEl("textarea", { cls: "yaos-settings-modal-textarea" });
 		textArea.rows = 3;
 		textArea.placeholder = "obsidian://yaos?action=room&…";
-		textArea.addEventListener("input", () => { inviteUrl = textArea.value.trim(); });
+
+		// Section shown when hub shares named folders — lets the spoke rename them locally.
+		const aliasSection = contentEl.createDiv({ cls: "yaos-settings-alias-section" });
+		aliasSection.style.display = "none";
+
+		const renderAliasSection = () => {
+			aliasSection.empty();
+			if (hubPaths.length === 0) {
+				aliasSection.style.display = "none";
+				return;
+			}
+			aliasSection.style.display = "";
+			aliasSection.createEl("p", {
+				text: "Optional: rename shared folders on this vault.",
+				cls: "yaos-modal-copy",
+			});
+			aliasInputs.clear();
+			for (const hubPath of hubPaths) {
+				const row = aliasSection.createDiv({ cls: "yaos-settings-alias-row" });
+				row.createSpan({ text: hubPath, cls: "yaos-settings-alias-hub-label" });
+				row.createSpan({ text: "→", cls: "yaos-settings-alias-arrow" });
+				const input = row.createEl("input", { type: "text", cls: "yaos-settings-alias-input" });
+				input.placeholder = hubPath.replace(/\/$/, "");
+				input.value = "";
+				aliasInputs.set(hubPath, input);
+			}
+		};
+
+		textArea.addEventListener("input", () => {
+			inviteUrl = textArea.value.trim();
+			try {
+				const url = new URL(inviteUrl);
+				const rawPaths = url.searchParams.get("paths") ?? "";
+				hubPaths = rawPaths ? rawPaths.split(",").map((p) => p.trim()).filter(Boolean) : [];
+			} catch {
+				hubPaths = [];
+			}
+			renderAliasSection();
+		});
 
 		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
 		buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
@@ -634,10 +681,19 @@ class JoinRoomModal extends Modal {
 				new Notice("Paste the invite link first.", 4000);
 				return;
 			}
+			// Build alias map from non-empty inputs. Normalise paths to end with "/".
+			const pathAliases: Record<string, string> = {};
+			for (const [hubPath, input] of aliasInputs) {
+				const localName = input.value.trim();
+				if (localName && localName !== hubPath.replace(/\/$/, "")) {
+					const localPath = localName.endsWith("/") ? localName : `${localName}/`;
+					pathAliases[hubPath] = localPath;
+				}
+			}
 			joinBtn.disabled = true;
 			joinBtn.textContent = "Joining…";
 			try {
-				await this.onJoin(inviteUrl);
+				await this.onJoin(inviteUrl, pathAliases);
 				this.close();
 			} catch (err) {
 				new Notice(`Failed to join room: ${err instanceof Error ? err.message : String(err)}`, 6000);
@@ -660,6 +716,9 @@ function buildRoomInviteUrl(host: string, token: string, room: RoomConfig): stri
 		roomId: room.roomId,
 		name: room.displayName,
 	});
+	if (room.includePaths.length > 0) {
+		params.set("paths", room.includePaths.join(","));
+	}
 	return `obsidian://yaos?${params.toString()}`;
 }
 
@@ -862,8 +921,8 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				});
 			roomsActions.createEl("button", { text: "Join with invite link" })
 				.addEventListener("click", () => {
-					new JoinRoomModal(this.app, async (inviteUrl) => {
-						await this.plugin.handleRoomInviteUrl(inviteUrl);
+					new JoinRoomModal(this.app, async (inviteUrl, pathAliases) => {
+						await this.plugin.handleRoomInviteUrl(inviteUrl, pathAliases);
 						this.display();
 					}).open();
 				});

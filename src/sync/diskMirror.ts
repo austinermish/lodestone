@@ -114,6 +114,8 @@ export class DiskMirror {
 			nextContent: string,
 		) => void,
 		private isPathSyncable: (path: string) => boolean = () => true,
+		/** Maps a CRDT-side path to the local vault disk path. Defaults to identity. */
+		private diskPath: (crdtPath: string) => string = (p) => p,
 	) {
 		this.debug = debug;
 	}
@@ -453,7 +455,8 @@ export class DiskMirror {
 			}
 		}
 
-		const normalized = normalizePath(path);
+		// Translate CRDT path → local disk path (identity when no alias is configured).
+		const normalized = normalizePath(this.diskPath(path));
 
 		try {
 			const existing = this.app.vault.getAbstractFileByPath(normalized);
@@ -541,10 +544,13 @@ export class DiskMirror {
 	}
 
 	private async handleRemoteDelete(path: string): Promise<void> {
+		// Internal state (observers, queues) is keyed by CRDT path.
 		const normalized = normalizePath(path);
+		// Disk operations use the local path (identical to CRDT path when no alias is set).
+		const diskNormalized = normalizePath(this.diskPath(path));
 		const wasOpen = this.openPaths.has(normalized);
 		const wasObserved = this.textObservers.has(normalized);
-		const wasSuppressed = this.isSuppressed(normalized);
+		const wasSuppressed = this.isSuppressed(diskNormalized);
 		this.unobserveText(normalized);
 		this.openPaths.delete(normalized);
 		this.pendingOpenWrites.delete(normalized);
@@ -562,15 +568,15 @@ export class DiskMirror {
 		}
 		this.trace?.("disk", "remote-delete", {
 			path,
-			normalizedPath: normalized,
+			normalizedPath: diskNormalized,
 			wasOpen,
 			wasObserved,
 			wasSuppressed,
 		});
 		// Unbind editor before suppressed delete so the vault `delete` event
 		// (which skips unbind due to suppression) doesn't leave a stale binding.
-		this.editorBindings.unbindByPath(normalized);
-		const file = this.app.vault.getAbstractFileByPath(normalized);
+		this.editorBindings.unbindByPath(diskNormalized);
+		const file = this.app.vault.getAbstractFileByPath(diskNormalized);
 		if (file instanceof TFile) {
 			try {
 				this.suppressDelete(path);
@@ -586,8 +592,12 @@ export class DiskMirror {
 	}
 
 	private async handleRemoteRename(oldPath: string, newPath: string): Promise<void> {
+		// Internal state (observers, queues) keyed by CRDT path.
 		const oldNormalized = normalizePath(oldPath);
 		const newNormalized = normalizePath(newPath);
+		// Disk operations keyed by local path (identical when no alias configured).
+		const oldDiskNormalized = normalizePath(this.diskPath(oldPath));
+		const newDiskNormalized = normalizePath(this.diskPath(newPath));
 		if (oldNormalized === newNormalized) return;
 
 		const wasOpen = this.openPaths.delete(oldNormalized);
@@ -611,32 +621,32 @@ export class DiskMirror {
 		this.forcedWritePaths.delete(oldNormalized);
 		this.unobserveText(oldNormalized);
 
-		this.editorBindings.updatePathsAfterRename(new Map([[oldNormalized, newNormalized]]));
+		this.editorBindings.updatePathsAfterRename(new Map([[oldDiskNormalized, newDiskNormalized]]));
 
-		const oldFile = this.app.vault.getAbstractFileByPath(oldNormalized);
+		const oldFile = this.app.vault.getAbstractFileByPath(oldDiskNormalized);
 		if (oldFile instanceof TFile) {
 			try {
-				const target = this.app.vault.getAbstractFileByPath(newNormalized);
+				const target = this.app.vault.getAbstractFileByPath(newDiskNormalized);
 				if (target instanceof TFile) {
-					this.suppressDelete(oldNormalized);
+					this.suppressDelete(oldPath);
 					await this.app.vault.delete(oldFile);
 				} else {
-					const dir = newNormalized.substring(0, newNormalized.lastIndexOf("/"));
+					const dir = newDiskNormalized.substring(0, newDiskNormalized.lastIndexOf("/"));
 					if (dir) {
 						const dirNode = this.app.vault.getAbstractFileByPath(normalizePath(dir));
 						if (!dirNode) {
 							await this.app.vault.createFolder(dir);
 						}
 					}
-					await this.app.fileManager.renameFile(oldFile, newNormalized);
+					await this.app.fileManager.renameFile(oldFile, newDiskNormalized);
 				}
-				this.log(`handleRemoteRename: "${oldNormalized}" -> "${newNormalized}"`);
+				this.log(`handleRemoteRename: "${oldDiskNormalized}" -> "${newDiskNormalized}"`);
 
 				// After the rename, clean up the source directory if it is now empty.
 				// A folder rename on a remote device fires one rename event per file; once
 				// all files have been moved out, the original folder would otherwise be
 				// left as a visible empty folder on this device.
-				const oldDir = oldNormalized.substring(0, oldNormalized.lastIndexOf("/"));
+				const oldDir = oldDiskNormalized.substring(0, oldDiskNormalized.lastIndexOf("/"));
 				if (oldDir) {
 					try {
 						const oldDirNode = this.app.vault.getAbstractFileByPath(normalizePath(oldDir));
@@ -649,7 +659,7 @@ export class DiskMirror {
 					}
 				}
 			} catch (err) {
-				console.error(`[yaos] handleRemoteRename failed for "${oldNormalized}" -> "${newNormalized}":`, err);
+				console.error(`[yaos] handleRemoteRename failed for "${oldDiskNormalized}" -> "${newDiskNormalized}":`, err);
 			}
 		}
 
@@ -862,22 +872,24 @@ export class DiskMirror {
 		return this.suppressedPaths.get(normalizePath(path)) ?? null;
 	}
 
-	private async suppressWrite(path: string, content: string): Promise<void> {
+	private async suppressWrite(crdtPath: string, content: string): Promise<void> {
 		// Record the exact content we wrote so vault modify/create events can
 		// acknowledge our own write by content fingerprint rather than timing.
 		// No TTL: the entry is consumed on the first matching event (or replaced
 		// on the next write), so slow I/O cannot cause the suppression to expire
 		// before the event arrives.
+		// Key by local disk path so the Obsidian modify/create event (which carries
+		// the local path) can match even when crdtPath differs from the disk path.
 		const fingerprint = await this.fingerprintContent(content);
-		this.suppressedPaths.set(normalizePath(path), {
+		this.suppressedPaths.set(normalizePath(this.diskPath(crdtPath)), {
 			kind: "write",
 			expectedBytes: fingerprint.bytes,
 			expectedHash: fingerprint.hash,
 		});
 	}
 
-	private suppressDelete(path: string): void {
-		this.suppressedPaths.set(normalizePath(path), {
+	private suppressDelete(crdtPath: string): void {
+		this.suppressedPaths.set(normalizePath(this.diskPath(crdtPath)), {
 			kind: "delete",
 		});
 	}
