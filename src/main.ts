@@ -3354,20 +3354,23 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		});
 		this.roomSyncs.set(room.roomId, roomSync);
 
+		const spokeAliases = (!isHub && room.pathAliases && Object.keys(room.pathAliases).length > 0)
+			? room.pathAliases
+			: null;
 		const roomEditorBindings = new EditorBindingManager(
 			roomSync,
 			this.settings.debug,
 			(source, msg, details) => this.trace(source, msg, details),
+			spokeAliases
+				? (diskPath) => applyReverseAlias(diskPath, spokeAliases)
+				: undefined,
 		);
 		this.roomEditorBindings.set(room.roomId, roomEditorBindings);
 		// Register the room's CM6 compartment so editors can be bound to it.
 		this.registerEditorExtension(roomEditorBindings.getBaseExtension());
 
 		const hubPaths = room.includePaths;
-		// For spoke vaults with a folder alias, translate CRDT paths to local disk paths.
-		const aliases = (!isHub && room.pathAliases && Object.keys(room.pathAliases).length > 0)
-			? room.pathAliases
-			: null;
+		const aliases = spokeAliases;
 		const roomMirror = new DiskMirror(
 			this.app,
 			roomSync,

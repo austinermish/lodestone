@@ -109,6 +109,7 @@ export class EditorBindingManager {
 		private vaultSync: VaultSync,
 		debug: boolean,
 		private trace?: TraceRecord,
+		private pathToCrdt: (diskPath: string) => string = (p) => p,
 	) {
 		this.debug = debug;
 	}
@@ -522,6 +523,7 @@ export class EditorBindingManager {
 		const file = view.file;
 		if (!file) return null;
 
+		const crdtPath = this.pathToCrdt(file.path);
 		const leafId =
 			(view.leaf as unknown as { id: string }).id ?? file.path;
 		const cm = this.getCmView(view);
@@ -535,7 +537,7 @@ export class EditorBindingManager {
 				yTextMatchesExpected: null,
 				undoManagerMatchesFacet: null,
 				facetFileId: null,
-				expectedFileId: this.vaultSync.getFileId(file.path) ?? null,
+				expectedFileId: this.vaultSync.getFileId(crdtPath) ?? null,
 				facetTextLength: null,
 				cmDocLength: null,
 			};
@@ -555,9 +557,9 @@ export class EditorBindingManager {
 		}
 
 		const binding = this.bindings.get(leafId);
-		const expectedText = this.vaultSync.getTextForPath(file.path);
+		const expectedText = this.vaultSync.getTextForPath(crdtPath);
 		const expectedFileId =
-			this.vaultSync.getFileId(file.path)
+			this.vaultSync.getFileId(crdtPath)
 			?? (expectedText ? this.vaultSync.getFileIdForText(expectedText) : undefined)
 			?? null;
 		const facetText = syncFacet?.ytext ?? null;
@@ -1071,17 +1073,19 @@ export class EditorBindingManager {
 		const file = view.file;
 		if (!file) return null;
 
-		const existingText = this.vaultSync.getTextForPath(file.path);
+		const crdtPath = this.pathToCrdt(file.path);
+
+		const existingText = this.vaultSync.getTextForPath(crdtPath);
 		if (existingText) {
 			return {
 				ytext: existingText,
 				fileId:
-					this.vaultSync.getFileId(file.path)
+					this.vaultSync.getFileId(crdtPath)
 					?? this.vaultSync.getFileIdForText(existingText),
 			};
 		}
 
-		if (this.isHardTombstonedPath(file.path)) {
+		if (this.isHardTombstonedPath(crdtPath)) {
 			this.handleTombstonedBinding(view, reason);
 			return null;
 		}
@@ -1093,14 +1097,14 @@ export class EditorBindingManager {
 		// opened file. That stale content would otherwise propagate to all connected
 		// vaults via the CRDT.
 		const currentContent = file.stat.size === 0 ? "" : view.editor.getValue();
-		const ytext = this.vaultSync.ensureFile(file.path, currentContent, deviceName);
+		const ytext = this.vaultSync.ensureFile(crdtPath, currentContent, deviceName);
 		if (!ytext) {
-			if (this.isHardTombstonedPath(file.path)) {
+			if (this.isHardTombstonedPath(crdtPath)) {
 				this.handleTombstonedBinding(view, `${reason}:ensureFile-null`);
 			} else {
-				this.log(`resolveBindingTarget: ensureFile returned null for "${file.path}" (reason=${reason})`);
+				this.log(`resolveBindingTarget: ensureFile returned null for "${file.path}" (crdtPath="${crdtPath}", reason=${reason})`);
 				this.trace?.("editor", "binding-target-missing", {
-					path: file.path,
+					path: crdtPath,
 					reason,
 					leafId:
 						(view.leaf as unknown as { id: string }).id ?? file.path,
@@ -1112,16 +1116,16 @@ export class EditorBindingManager {
 		return {
 			ytext,
 			fileId:
-				this.vaultSync.getFileId(file.path)
+				this.vaultSync.getFileId(crdtPath)
 				?? this.vaultSync.getFileIdForText(ytext),
 		};
 	}
 
-	private isHardTombstonedPath(path: string): boolean {
+	private isHardTombstonedPath(crdtPath: string): boolean {
 		return (
-			!this.vaultSync.getTextForPath(path)
-			&& !this.vaultSync.isPendingRenameTarget(path)
-			&& this.vaultSync.isMarkdownTombstoned(path)
+			!this.vaultSync.getTextForPath(crdtPath)
+			&& !this.vaultSync.isPendingRenameTarget(crdtPath)
+			&& this.vaultSync.isMarkdownTombstoned(crdtPath)
 		);
 	}
 
