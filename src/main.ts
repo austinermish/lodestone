@@ -607,8 +607,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					}
 					if (this.openFilePaths.has(oldPath)) {
 						this.diskMirror?.notifyFileClosed(oldPath);
+						this.notifyRoomMirrorsFileClosed(oldPath);
 						this.openFilePaths.delete(oldPath);
 						this.diskMirror?.notifyFileOpened(newPath);
+						this.notifyRoomMirrorsFileOpened(newPath);
 						this.openFilePaths.add(newPath);
 						this.log(`Rename batch: moved observer "${oldPath}" -> "${newPath}"`);
 					}
@@ -1304,10 +1306,32 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	 * Track that a file is open. Notifies diskMirror to start observing.
 	 * Also cleans up observers for files that are no longer open in any leaf.
 	 */
+	private notifyRoomMirrorsFileOpened(localPath: string): void {
+		for (const room of this.settings.rooms) {
+			const roomMirror = this.roomDiskMirrors.get(room.roomId);
+			const roomSync = this.roomSyncs.get(room.roomId);
+			if (!roomMirror || !roomSync) continue;
+			const crdtPath = applyReverseAlias(localPath, room.pathAliases ?? {});
+			if (roomSync.getTextForPath(crdtPath)) {
+				roomMirror.notifyFileOpened(crdtPath);
+			}
+		}
+	}
+
+	private notifyRoomMirrorsFileClosed(localPath: string): void {
+		for (const room of this.settings.rooms) {
+			const roomMirror = this.roomDiskMirrors.get(room.roomId);
+			if (!roomMirror) continue;
+			const crdtPath = applyReverseAlias(localPath, room.pathAliases ?? {});
+			roomMirror.notifyFileClosed(crdtPath);
+		}
+	}
+
 	private trackOpenFile(path: string): void {
 		// Notify disk mirror for the newly opened file
 		if (!this.openFilePaths.has(path)) {
 			this.diskMirror?.notifyFileOpened(path);
+			this.notifyRoomMirrorsFileOpened(path);
 			this.openFilePaths.add(path);
 		}
 
@@ -1328,6 +1352,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		for (const tracked of this.openFilePaths) {
 			if (!currentlyOpen.has(tracked)) {
 				this.diskMirror?.notifyFileClosed(tracked);
+				this.notifyRoomMirrorsFileClosed(tracked);
 				this.openFilePaths.delete(tracked);
 				this.log(`${reason}: closed observer for "${tracked}"`);
 				this.maybeImportDeferredClosedOnlyPath(tracked, reason);
@@ -1512,6 +1537,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					this.editorBindings?.unbindByPath(file.path);
 					for (const mgr of this.roomEditorBindings.values()) mgr.unbindByPath(file.path);
 					this.diskMirror?.notifyFileClosed(file.path);
+					this.notifyRoomMirrorsFileClosed(file.path);
 					this.openFilePaths.delete(file.path);
 
 					// Route the delete to the correct VaultSync (room or main vault).
