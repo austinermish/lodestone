@@ -370,6 +370,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				const aliases = room.pathAliases ?? {};
 				const crdtPath = applyReverseAlias(localPath, aliases);
 				if (roomSync.getTextForPath(crdtPath)) return true;
+				// Also match new files inside the hub's shared folders (not yet in Y.Doc).
+				const hubPaths = room.hubIncludePaths ?? [];
+				if (hubPaths.length > 0 && hubPaths.some((p) => crdtPath.startsWith(p))) return true;
 			}
 		}
 		return false;
@@ -1286,6 +1289,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				const roomSync = this.roomSyncs.get(room.roomId);
 				const crdtPath = applyReverseAlias(filePath, room.pathAliases ?? {});
 				if (roomSync?.getTextForPath(crdtPath)) return mgr;
+				// Also route new files that fall within the hub's shared folders
+				// (not yet in Y.Doc) so they open with the room binding.
+				const hubPaths = room.hubIncludePaths ?? [];
+				if (hubPaths.length > 0 && hubPaths.some((p) => crdtPath.startsWith(p))) return mgr;
 			}
 		}
 		return this.editorBindings;
@@ -1299,6 +1306,21 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const file = view.file;
 		if (!file) return;
 		const target = this.getBindingManagerForFile(file.path);
+
+		// Trace which binding manager is selected so real-time collaboration
+		// routing issues can be diagnosed from the debug log.
+		const isMainBinding = target === this.editorBindings;
+		let roomId: string | undefined;
+		if (!isMainBinding) {
+			for (const [rid, mgr] of this.roomEditorBindings) {
+				if (mgr === target) { roomId = rid; break; }
+			}
+		}
+		this.trace?.("editor", "bind-manager-selected", {
+			path: file.path,
+			manager: isMainBinding ? "main" : "room",
+			roomId,
+		});
 
 		// Unbind from any manager that is not the target
 		if (target !== this.editorBindings) {
@@ -2315,6 +2337,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					this.log(`syncFileFromDisk: applying diff to room file "${file.path}"`);
 					applyDiffToYText(existingText, content, "disk-sync");
 				}
+			} else {
+				// New file not yet in the room Y.Doc — seed it now so spokes see it.
+				this.log(`syncFileFromDisk: seeding new room file "${file.path}"`);
+				vaultSync.ensureFile(crdtPath, content, this.settings.deviceName);
 			}
 			await this.updateDiskIndexForPath(file.path);
 		} catch (err) {
@@ -3324,7 +3350,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	}
 
 	/** Join an existing room as spoke. Saves config, starts room sync. */
-	async joinRoom(roomId: string, displayName: string, includePaths: string[], pathAliases: Record<string, string> = {}): Promise<void> {
+	async joinRoom(roomId: string, displayName: string, includePaths: string[], pathAliases: Record<string, string> = {}, hubIncludePaths: string[] = []): Promise<void> {
 		if (this.settings.rooms.find((r) => r.roomId === roomId)) {
 			throw new Error("Already in this room.");
 		}
@@ -3334,6 +3360,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			displayName,
 			includePaths,
 			...(Object.keys(pathAliases).length > 0 ? { pathAliases } : {}),
+			...(hubIncludePaths.length > 0 ? { hubIncludePaths } : {}),
 		};
 		this.settings.rooms = [...this.settings.rooms, room];
 		await this.saveSettings();
@@ -3450,6 +3477,12 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				if (roomSync.getTextForPath(crdtPath)) {
 					return { roomSync, crdtPath };
 				}
+				// For new files not yet in the room Y.Doc, fall back to the hub's
+				// shared folder paths stored at join time.
+				const hubPaths = room.hubIncludePaths ?? [];
+				if (hubPaths.length > 0 && hubPaths.some((p) => crdtPath.startsWith(p))) {
+					return { roomSync, crdtPath };
+				}
 			}
 		}
 		return null;
@@ -3510,6 +3543,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		await roomSync.waitForProviderSync();
 
 		const allFiles = this.app.vault.getMarkdownFiles();
+		const diskPaths = new Set(allFiles.map((f) => f.path));
 		let seeded = 0;
 		for (const file of allFiles) {
 			if (!room.includePaths.some((p) => file.path.startsWith(p))) continue;
@@ -3528,6 +3562,22 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		}
 		if (seeded > 0) {
 			this.log(`Room "${room.displayName}": seeded ${seeded} file(s) from disk`);
+		}
+
+		// Tombstone Y.Doc entries that no longer exist on disk. These accumulate
+		// when files are deleted while the room sync is not running, and would
+		// otherwise appear as ghost files on spoke vaults at join time.
+		const activePaths = roomSync.getActiveMarkdownPaths();
+		let pruned = 0;
+		for (const crdtPath of activePaths) {
+			if (!room.includePaths.some((p) => crdtPath.startsWith(p))) continue;
+			if (!diskPaths.has(crdtPath)) {
+				roomSync.handleDelete(crdtPath, this.settings.deviceName);
+				pruned++;
+			}
+		}
+		if (pruned > 0) {
+			this.log(`Room "${room.displayName}": pruned ${pruned} stale Y.Doc entry(s)`);
 		}
 	}
 
@@ -3548,8 +3598,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const host = params.get("host")?.trim() ?? "";
 		const token = params.get("token")?.trim() ?? "";
 		const name = params.get("name")?.trim() ?? "Shared room";
+		const rawPaths = params.get("paths")?.trim() ?? "";
+		const hubIncludePaths = rawPaths ? rawPaths.split(",").map((p) => p.trim()).filter(Boolean) : [];
 
-		await this.handleRoomJoinParams({ roomId, host, token, name, pathAliases });
+		await this.handleRoomJoinParams({ roomId, host, token, name, pathAliases, hubIncludePaths });
 	}
 
 	/** Internal handler for both protocol URL and settings UI join flows. */
@@ -3559,6 +3611,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		token: string;
 		name: string;
 		pathAliases?: Record<string, string>;
+		hubIncludePaths?: string[];
 	}): Promise<void> {
 		if (!p.roomId) throw new Error("Invite link is missing roomId.");
 
@@ -3580,7 +3633,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		}
 
 		// Spoke joins with no includePaths — the room Y.Doc is already scoped by the hub.
-		await this.joinRoom(p.roomId, p.name, [], p.pathAliases ?? {});
+		await this.joinRoom(p.roomId, p.name, [], p.pathAliases ?? {}, p.hubIncludePaths ?? []);
 
 		if (restartNeeded) {
 			this.teardownSync();

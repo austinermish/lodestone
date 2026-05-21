@@ -22,6 +22,12 @@ export interface RoomConfig {
 	 * Paths not listed use the hub's original name.
 	 */
 	pathAliases?: Record<string, string>;
+	/**
+	 * For spoke only: the hub's shared folder paths (from the hub's includePaths).
+	 * Stored at join time so the spoke can route newly-created files to the room Y.Doc
+	 * before those files have a Y.Text entry.
+	 */
+	hubIncludePaths?: string[];
 }
 
 export interface VaultSyncSettings {
