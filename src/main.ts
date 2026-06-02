@@ -1330,6 +1330,19 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			if (mgr !== target) mgr.unbind(view);
 		}
 
+		// If the file is not currently tracked as open, it was closed and is
+		// being reopened. Force-clear any stale binding so bind() creates a
+		// fresh yCollab instead of treating a cached CM as "already healthy".
+		// openFilePaths is populated by trackOpenFile, which is called AFTER
+		// this function, so the check reliably detects reopen vs. active-editor
+		// rebind.
+		if (!this.openFilePaths.has(file.path)) {
+			this.editorBindings?.unbindByPath(file.path);
+			for (const mgr of this.roomEditorBindings.values()) {
+				mgr.unbindByPath(file.path);
+			}
+		}
+
 		target?.bind(view, deviceName);
 	}
 
