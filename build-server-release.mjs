@@ -58,8 +58,8 @@ const updateManifest = {
 	minCompatibleServerVersionForPlugin,
 	minCompatiblePluginVersionForServer,
 	upgradeOrder: "either",
-	releaseNotesUrl: `https://github.com/Opkalla/yaos/releases/tag/${rootPackage.version}`,
-	upgradeGuideUrl: "https://github.com/Opkalla/yaos#updating-your-server",
+	releaseNotesUrl: `https://github.com/austinermish/yaos/releases/tag/${rootPackage.version}`,
+	upgradeGuideUrl: "https://github.com/austinermish/yaos#updating-your-server",
 };
 
 const serverZipManifest = {

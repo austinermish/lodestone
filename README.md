@@ -6,7 +6,7 @@ Your notes stay in sync instantly across devices, without conflicted copies, del
 
 <img src="https://github.com/user-attachments/assets/ee937050-8a05-4d56-9c5f-3ae5003496fc" alt="YAOS syncing a note across desktop and mobile in real time" width="720" />
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Opkalla/yaos/tree/main/server)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/austinermish/yaos/tree/main/server)
 
 [![License: 0-BSD](https://img.shields.io/badge/license-0--BSD-green)](LICENSE)
 
@@ -43,7 +43,7 @@ Click **Deploy to Cloudflare** above. Cloudflare creates a Worker in your accoun
 Open the Worker URL. Click **Claim** to lock the server to you and generate your setup token.
 
 **3. Install the plugin**
-YAOS is in the Obsidian Marketplace review queue. To install today, add it through [BRAT](https://github.com/TfTHacker/obsidian42-brat): open BRAT settings → **Add Beta plugin** → paste `Opkalla/yaos`.
+YAOS is in the Obsidian Marketplace review queue. To install today, add it through [BRAT](https://github.com/TfTHacker/obsidian42-brat): open BRAT settings → **Add Beta plugin** → paste `austinermish/yaos`.
 
 **4. Connect your vault**
 From the claim page, open the setup link or scan the QR code. YAOS fills in the connection details automatically.
@@ -159,6 +159,14 @@ Access via command palette (Ctrl/Cmd+P):
 **Files not syncing**: Check exclude patterns. Files over max size are skipped. Use debug logging to see what's happening, and then raise an issue on GitHub.
 
 **Conflicts after offline edits**: CRDTs merge automatically but the result depends on operation order. Review merged content if needed.
+
+## Origin
+
+YAOS started as a fork of [kavinsood/yaos](https://github.com/kavinsood/yaos), an excellent Cloudflare-native real-time sync engine for Obsidian. Full credit to Kavin for the original architecture: Durable Object sync rooms, Yjs CRDTs for conflict-free merges, and R2-backed attachments and snapshots — the hard part of this project.
+
+Upstream YAOS uses a **vault pool** topology, where every connected vault shares every other vault's files and folders symmetrically. This fork changes that to a **hub/spoke** topology instead: one host vault, one or more spoke vaults, with real-time collaborative editing in both directions, but structural changes (creating, renaming, moving, or deleting files and folders) restricted to the host. That's a different sharing model than upstream, not just a feature add-on, which is why this lives as its own repository rather than a PR back upstream.
+
+The 0-BSD license means none of this required permission or attribution to fork — but the credit is owed anyway. If you want the original vault-pool model, go use Kavin's version.
 
 ## License
 
