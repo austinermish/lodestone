@@ -18,7 +18,7 @@ export async function propagateSpokeToHub(
 	spokeVaultId: string,
 	hubVaultId: string,
 	update: Uint8Array,
-): Promise<void> {
+): Promise<{ rejected: boolean }> {
 	try {
 		const stub = await getServerByName(env.YAOS_SYNC, hubVaultId);
 		const res = await stub.fetch("https://internal/__yaos/apply-spoke-update", {
@@ -31,9 +31,13 @@ export async function propagateSpokeToHub(
 		});
 		if (!res.ok) {
 			console.warn(`${LOG_PREFIX} spoke→hub failed (${res.status})`);
+			return { rejected: false };
 		}
+		const payload = (await res.json().catch(() => null)) as { rejected?: boolean } | null;
+		return { rejected: payload?.rejected === true };
 	} catch (err) {
 		console.warn(`${LOG_PREFIX} spoke→hub error:`, err);
+		return { rejected: false };
 	}
 }
 

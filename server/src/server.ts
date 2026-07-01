@@ -1,5 +1,7 @@
 import * as Y from "yjs";
+import * as awarenessProtocol from "y-protocols/awareness";
 import { YServer } from "y-partyserver";
+import type { Connection, ConnectionContext } from "partyserver";
 import { runSerialized, runSingleFlight } from "./asyncConcurrency";
 import { ChunkedDocStore } from "./chunkedDocStore";
 import { readRoomMeta, type RoomMeta, writeRoomMeta } from "./roomMeta";
@@ -20,6 +22,20 @@ import {
 	listHubSpokes,
 } from "./syncBridge";
 import type { SpokeEntry } from "./hubRegistry";
+
+/**
+ * y-partyserver's WSSharedDoc disables y-protocols/awareness's own periodic
+ * stale-client sweep (`clearInterval(this.awareness._checkInterval)`), and
+ * VaultSyncServer never replaces it. Clean disconnects are still handled by
+ * the base class's onClose -> removeAwarenessStates. But a client that drops
+ * without a clean close (mobile backgrounding, network loss, crash) leaves
+ * its cursor in `document.awareness` forever — hence the stale-cursor bug.
+ * This DO alarm re-implements that sweep: any awareness clientID with no
+ * currently-open connection after AWARENESS_GC_INTERVAL_MS is considered
+ * abandoned and removed.
+ */
+const AWARENESS_GC_INTERVAL_MS = 30_000;
+const AWARENESS_IDS_CONNECTION_STATE_KEY = "__ypsAwarenessIds";
 
 const MAX_DEBUG_TRACE_EVENTS = 200;
 const JOURNAL_COMPACT_MAX_ENTRIES = 50;
@@ -119,6 +135,43 @@ export class VaultSyncServer extends YServer {
 		return super.fetch(request);
 	}
 
+	async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
+		await super.onConnect(connection, ctx);
+		await this.scheduleAwarenessGc();
+	}
+
+	async onAlarm(): Promise<void> {
+		const controlledIds = new Set<number>();
+		for (const conn of this.getConnections<unknown>()) {
+			const state = conn.state as Record<string, unknown> | null;
+			const ids = state?.[AWARENESS_IDS_CONNECTION_STATE_KEY];
+			if (Array.isArray(ids)) {
+				for (const id of ids) {
+					if (typeof id === "number") controlledIds.add(id);
+				}
+			}
+		}
+
+		const staleIds: number[] = [];
+		for (const clientId of this.document.awareness.getStates().keys()) {
+			if (!controlledIds.has(clientId)) staleIds.push(clientId);
+		}
+
+		if (staleIds.length > 0) {
+			awarenessProtocol.removeAwarenessStates(this.document.awareness, staleIds, null);
+			await this.recordTrace("awareness-gc-swept-stale-clients", { staleIds });
+		}
+
+		// Keep sweeping while anyone is connected, in case a future client drops uncleanly.
+		if ([...this.getConnections()].length > 0 || this.document.awareness.getStates().size > 0) {
+			await this.scheduleAwarenessGc();
+		}
+	}
+
+	private async scheduleAwarenessGc(): Promise<void> {
+		await this.ctx.storage.setAlarm(Date.now() + AWARENESS_GC_INTERVAL_MS);
+	}
+
 	async onRequest(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 
@@ -194,6 +247,22 @@ export class VaultSyncServer extends YServer {
 			const updateBytes = new Uint8Array(await request.arrayBuffer());
 			if (updateBytes.byteLength === 0) {
 				return json({ ok: true, applied: false, reason: "empty" });
+			}
+
+			// Spokes may edit the body of an existing file's Y.Text, but must not
+			// create/rename/move/delete files or folders (pathToId/meta/idToText
+			// top-level keys). Enforced here at the transaction layer — never by
+			// inspecting raw update bytes — by replaying the update on a throwaway
+			// doc and checking which Y types it actually touched.
+			await this.ensureDocumentLoaded();
+			if (this.updateTouchesStructure(updateBytes)) {
+				await this.recordTrace("spoke-structural-update-rejected", { originVaultId });
+				return json({
+					ok: true,
+					applied: false,
+					rejected: true,
+					reason: "structural-change-not-permitted",
+				});
 			}
 
 			// Filter: build a temporary doc from the spoke update, then extract only
@@ -493,7 +562,13 @@ export class VaultSyncServer extends YServer {
 
 		// Spoke direction: propagate changes up to the hub.
 		if ((this._mode === "spoke" || this._mode === "hub+spoke") && this._hubVaultId) {
-			void propagateSpokeToHub(env, originVaultId, this._hubVaultId, delta);
+			void propagateSpokeToHub(env, originVaultId, this._hubVaultId, delta).then((result) => {
+				if (result.rejected) {
+					void this.revertRejectedStructuralChange(delta).catch((err) => {
+						console.error(`${LOG_PREFIX} failed to revert rejected structural change:`, err);
+					});
+				}
+			});
 		}
 
 		// Hub direction: fan out changes down to all connected spokes.
@@ -537,6 +612,122 @@ export class VaultSyncServer extends YServer {
 		// at the meta level — unknown file IDs without meta entries are inert.
 		// A more aggressive filter can be layered in without changing the protocol.
 		return update;
+	}
+
+	/**
+	 * Replays `updateBytes` on a scratch clone of the current document and
+	 * reports which top-level keys of the vault-tree structure maps (pathToId,
+	 * meta, idToText) it touched. Edits to the body of an existing Y.Text never
+	 * show up here — only add/update/delete of a map *entry* does (file
+	 * create/rename/move/delete).
+	 *
+	 * The clone MUST be seeded with the real document's current state before
+	 * replay: `updateBytes` is a delta relative to a state vector, not a full
+	 * snapshot, so an update that overwrites an existing key (e.g. a rename,
+	 * which rewrites `meta`'s path field) references a predecessor item that
+	 * only exists in the real document. Replaying against a bare empty Y.Doc
+	 * silently drops that item instead of registering it as a change.
+	 */
+	private extractStructuralKeys(updateBytes: Uint8Array): {
+		pathToId: Set<string>;
+		meta: Set<string>;
+		idToText: Set<string>;
+	} {
+		const probeDoc = new Y.Doc();
+		Y.applyUpdate(probeDoc, Y.encodeStateAsUpdate(this.document));
+
+		const touched = {
+			pathToId: new Set<string>(),
+			meta: new Set<string>(),
+			idToText: new Set<string>(),
+		};
+		const pathToIdMap: unknown = probeDoc.getMap("pathToId");
+		const metaMap: unknown = probeDoc.getMap("meta");
+		const idToTextMap: unknown = probeDoc.getMap("idToText");
+
+		const handler = (transaction: Y.Transaction) => {
+			for (const [type, events] of transaction.changedParentTypes) {
+				let bucket: Set<string> | null = null;
+				if ((type as unknown) === pathToIdMap) bucket = touched.pathToId;
+				else if ((type as unknown) === metaMap) bucket = touched.meta;
+				else if ((type as unknown) === idToTextMap) bucket = touched.idToText;
+				if (!bucket) continue;
+				for (const event of events) {
+					if (event instanceof Y.YMapEvent) {
+						for (const key of event.keys.keys()) bucket.add(key);
+					}
+				}
+			}
+		};
+		probeDoc.on("afterTransaction", handler);
+		try {
+			Y.applyUpdate(probeDoc, updateBytes);
+		} finally {
+			probeDoc.off("afterTransaction", handler);
+			probeDoc.destroy();
+		}
+		return touched;
+	}
+
+	/** True if `updateBytes` adds/renames/moves/deletes a file or folder rather than just editing text. */
+	private updateTouchesStructure(updateBytes: Uint8Array): boolean {
+		const touched = this.extractStructuralKeys(updateBytes);
+		return touched.pathToId.size > 0 || touched.meta.size > 0 || touched.idToText.size > 0;
+	}
+
+	/**
+	 * Undo a structural change locally after the hub has rejected it. The spoke
+	 * already applied the change to its own document before sync (Obsidian fired
+	 * the vault event first); since the hub never merged it, this vault must roll
+	 * its own copy back so the two documents don't permanently diverge.
+	 *
+	 * Runs under `_applyingCrossVaultUpdate` so it doesn't get re-proposed to the
+	 * hub (which would just reject it again and loop forever).
+	 */
+	private async revertRejectedStructuralChange(delta: Uint8Array): Promise<void> {
+		await this.ensureDocumentLoaded();
+		const touched = this.extractStructuralKeys(delta);
+		if (touched.pathToId.size === 0 && touched.meta.size === 0 && touched.idToText.size === 0) {
+			return;
+		}
+
+		// Match the plugin's own tombstone shape (vaultSync.ts setMetaDeleted) so
+		// downstream consumers (orphan GC, snapshot diff) recognize this as a
+		// normal soft-delete rather than a malformed meta entry. Schema v2 uses a
+		// minimal {path, deletedAt} tombstone; v1 (and unset, which the plugin
+		// itself treats as v1) keeps the legacy {deleted, deletedAt, mtime} shape.
+		const schemaVersion = this.currentSchemaVersion();
+		const isLegacySchema = schemaVersion === null || schemaVersion < 2;
+		const deletedAt = Date.now();
+
+		this._applyingCrossVaultUpdate = true;
+		try {
+			const pathToId = this.document.getMap<string>("pathToId");
+			const meta = this.document.getMap<Record<string, unknown>>("meta");
+			const idToText = this.document.getMap<Y.Text>("idToText");
+			this.document.transact(() => {
+				for (const key of touched.pathToId) pathToId.delete(key);
+				for (const key of touched.idToText) idToText.delete(key);
+				for (const key of touched.meta) {
+					const existing = meta.get(key);
+					const path = typeof existing?.path === "string" ? existing.path : undefined;
+					meta.set(
+						key,
+						isLegacySchema
+							? { path, deleted: true, deletedAt, mtime: deletedAt }
+							: { path, deletedAt },
+					);
+				}
+			});
+		} finally {
+			this._applyingCrossVaultUpdate = false;
+		}
+
+		await this.recordTrace("spoke-structural-change-reverted", {
+			pathToIdKeys: Array.from(touched.pathToId),
+			metaKeys: Array.from(touched.meta),
+			idToTextKeys: Array.from(touched.idToText),
+		});
 	}
 
 	private getRoomId(): string {
