@@ -62,30 +62,46 @@ git commit -m "X.Y.Z"
 git push origin main
 ```
 
-### Creating a GitHub Release
+### Creating a GitHub Release (tag-driven — the ONLY release path)
 
-After pushing, build the artifacts, write release notes to a temp file, create the release, then delete the temp file:
+Do **not** run `gh release create` manually — a hand-made release skips
+`release.yml` and omits `lodestone-server.zip` + `update-manifest.json`, which
+breaks the zero-terminal server auto-update for that version. Pushing the tag is
+what creates the release:
 
 ```bash
-# Build production artifacts
-npm run build
-
-# Write release notes to temp file, create release, then clean up
-cat > /tmp/lodestone-X.Y.Z-notes.md << 'EOF'
-<release notes here>
-EOF
-
-gh release create X.Y.Z \
-  --title "X.Y.Z — <short description>" \
-  --notes-file /tmp/lodestone-X.Y.Z-notes.md \
-  main.js manifest.json styles.css
-
-sudo rm /tmp/lodestone-X.Y.Z-notes.md
+git tag X.Y.Z
+git push origin X.Y.Z
+# release.yml builds, tests, verifies tag == manifest version, and publishes:
+# lodestone.zip, lodestone-server.zip, update-manifest.json, main.js, manifest.json, styles.css
 ```
 
-Note: plain `rm` works on `/tmp` files — do **not** use `sudo rm`.
+Wait for the workflow to go green (`gh run watch` or poll `gh run list`), then
+verify assets with `gh release view X.Y.Z`.
 
-Release artifacts: `main.js`, `manifest.json`, `styles.css`.
+### Patch notes (REQUIRED for every release)
+
+The workflow creates the release with auto-generated commit lists — always
+replace those with **human-readable patch notes** once the workflow completes:
+
+```bash
+cat > /tmp/lodestone-X.Y.Z-notes.md << 'EOF'
+## What's changed
+<user-facing summary: what broke, what's fixed, what's new — written for a
+plugin user, not a contributor. Group as "Fixed" / "Added" / "Changed".>
+
+## Upgrade notes
+<anything the user must DO: server redeploy required? leave/rejoin a room?
+re-pair a device? If nothing, say "None — plugin update only.">
+EOF
+
+gh release edit X.Y.Z --notes-file /tmp/lodestone-X.Y.Z-notes.md
+rm /tmp/lodestone-X.Y.Z-notes.md
+```
+
+Guidelines: lead with the most user-visible change; name symptoms the user may
+have hit ("notes duplicated after a rename") rather than internal mechanisms;
+always state whether a **server redeploy** is needed.
 
 ### Release after every commit
 
@@ -95,8 +111,8 @@ Release artifacts: `main.js`, `manifest.json`, `styles.css`.
 2. Edit `package.json`, `manifest.json`, `versions.json`
 3. `git add package.json manifest.json versions.json && git commit -m "X.Y.Z"`
 4. `git push origin main`
-5. `npm run build`
-6. Create the release (see template above)
+5. `git tag X.Y.Z && git push origin X.Y.Z` — release.yml does the rest
+6. After the workflow is green: **write patch notes** (see above)
 
 ## Architecture
 
