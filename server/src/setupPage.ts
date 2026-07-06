@@ -24,7 +24,7 @@ function escapeHtml(value: string): string {
 }
 
 const IS_MARKETPLACE_APPROVED = false;
-const DEFAULT_DEPLOY_REPO = "austinermish/yaos";
+const DEFAULT_DEPLOY_REPO = "austinermish/lodestone";
 
 function normalizeDeployRepo(value: string | undefined): string {
 	const raw = value?.trim();

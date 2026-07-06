@@ -100,7 +100,7 @@ const OPEN_FILE_EXTERNAL_EDIT_IDLE_GRACE_MS = 1200;
 const BOUND_RECOVERY_LOCK_MS = 1500;
 const CAPABILITY_REFRESH_INTERVAL_MS = 30_000;
 const UPDATE_MANIFEST_URLS = [
-	"https://github.com/austinermish/yaos/releases/latest/download/update-manifest.json",
+	"https://github.com/austinermish/lodestone/releases/latest/download/update-manifest.json",
 ] as const;
 const UPDATE_MANIFEST_CACHE_MS = 24 * 60 * 60 * 1000;
 const GITHUB_OPS_WORKFLOW_PATH = ".github/workflows/yaos-ops.yml";
@@ -129,12 +129,12 @@ function buildGithubOpsBootstrapWorkflowYaml(): string {
 		"    inputs:",
 		"      action: { type: choice, required: true, default: update, options: [update, revert] }",
 		"      version: { type: string, required: false }",
-		"      release_repo: { type: string, required: false, default: austinermish/yaos }",
+		"      release_repo: { type: string, required: false, default: austinermish/lodestone }",
 		"permissions:",
 		"  contents: write",
 		"jobs:",
 		"  run:",
-		"    uses: austinermish/yaos/.github/workflows/yaos-ops-reusable.yml@main",
+		"    uses: austinermish/lodestone/.github/workflows/yaos-ops-reusable.yml@main",
 		"    with:",
 		"      action: ${{ github.event.inputs.action }}",
 		"      version: ${{ github.event.inputs.version }}",

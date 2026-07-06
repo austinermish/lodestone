@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-const defaultReleaseRepo = "austinermish/yaos";
+const defaultReleaseRepo = "austinermish/lodestone";
 const releaseRepo = process.env.YAOS_RELEASE_REPO?.trim() || defaultReleaseRepo;
 const releaseVersion = process.env.YAOS_RELEASE_VERSION?.trim() ?? "";
 const explicitArtifactInput =

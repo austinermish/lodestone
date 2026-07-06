@@ -97,7 +97,7 @@ export const DEFAULT_SETTINGS: VaultSyncSettings = {
 	rooms: [],
 };
 
-const CLOUDFLARE_DEPLOY_URL = "https://deploy.workers.cloudflare.com/?url=https://github.com/austinermish/yaos/tree/main/server";
+const CLOUDFLARE_DEPLOY_URL = "https://deploy.workers.cloudflare.com/?url=https://github.com/austinermish/lodestone/tree/main/server";
 
 /** Generate a random vault ID (16 bytes, base64url). */
 export function generateVaultId(): string {

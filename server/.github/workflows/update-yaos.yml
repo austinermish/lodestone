@@ -10,7 +10,7 @@ on:
       release_repo:
         description: "Optional owner/repo to pull releases from"
         required: false
-        default: "austinermish/yaos"
+        default: "austinermish/lodestone"
         type: string
 
 permissions:

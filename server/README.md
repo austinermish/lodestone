@@ -2,7 +2,7 @@
 
 Cloudflare Worker server for the YAOS Obsidian plugin. It relays Yjs CRDT updates through a Durable Object and stores attachments plus snapshots in R2.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/austinermish/yaos/tree/main/server)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/austinermish/lodestone/tree/main/server)
 
 ## Architecture
 
@@ -48,7 +48,7 @@ That claim page generates a token in the browser and returns an `obsidian://yaos
 
 The Deploy to Cloudflare button creates a new repository in your own Git account and connects this Worker to that new repo.
 
-That means future pushes to your generated repo will redeploy automatically, but future pushes to the original `austinermish/yaos` template repo will not update your existing Worker on their own.
+That means future pushes to your generated repo will redeploy automatically, but future pushes to the original `austinermish/lodestone` template repo will not update your existing Worker on their own.
 
 To pick up new YAOS changes later:
 
