@@ -276,6 +276,24 @@ async function isAuthorized(
 	return false;
 }
 
+// Isolate-level cache so we only write the first-client marker once per
+// worker instance instead of once per authenticated request.
+let clientSeenMarked = false;
+
+/** Record (once) that an authenticated client has reached this server. */
+function markClientSeen(env: Env, ctx: ExecutionContext): void {
+	if (clientSeenMarked) return;
+	clientSeenMarked = true;
+	const id = env.LODESTONE_CONFIG.idFromName("global-config");
+	const stub = env.LODESTONE_CONFIG.get(id);
+	ctx.waitUntil(
+		stub.fetch("https://internal/__lodestone/client-seen", { method: "POST" }).catch(() => {
+			// Best-effort marker; retry on a later request.
+			clientSeenMarked = false;
+		}),
+	);
+}
+
 function buildObsidianSetupUrl(host: string, token: string, vaultId?: string): string {
 	const params = new URLSearchParams({
 		action: "setup",
@@ -633,7 +651,7 @@ async function createSnapshotFromLiveDoc(
 }
 
 const worker = {
-	async fetch(req: Request, env: Env): Promise<Response> {
+	async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(req.url);
 		if (
 			req.method === "OPTIONS"
@@ -662,6 +680,17 @@ const worker = {
 					deployRepo: canonicalRepoForSetup(env),
 				});
 			return html(body);
+		}
+
+		if (req.method === "GET" && url.pathname === "/api/setup-status") {
+			let clientConnected = false;
+			try {
+				const config = await getStoredServerConfig(env);
+				clientConnected = config.firstClientAt !== null;
+			} catch {
+				// Config unavailable; report not-connected rather than erroring.
+			}
+			return withCors(json({ claimed: authState.claimed, clientConnected }));
 		}
 
 		if (req.method === "GET" && url.pathname === "/mobile-setup") {
@@ -736,6 +765,7 @@ const worker = {
 			if (!(await isAuthorized(authState, token))) {
 				return withCors(json({ error: "unauthorized" }, 401));
 			}
+			markClientSeen(env, ctx);
 
 			let body: {
 				updateProvider?: unknown;
@@ -793,6 +823,7 @@ const worker = {
 				const response = rejectSocket(req, "unauthorized");
 				return isWebSocketRequest(req) ? response : withCors(response);
 			}
+			markClientSeen(env, ctx);
 			if (!clientSchema) {
 				await recordVaultTrace(env, syncRoute.vaultId, "ws-rejected", {
 					reason: "update_required",
@@ -848,6 +879,7 @@ const worker = {
 			if (!(await isAuthorized(authState, token))) {
 				return withCors(json({ error: "unauthorized" }, 401));
 			}
+			markClientSeen(env, ctx);
 
 			const hubVaultId = decodeURIComponent(hubManagementMatch[1] ?? "");
 			const subPath = hubManagementMatch[2] ?? "";
@@ -928,6 +960,7 @@ const worker = {
 			});
 			return withCors(json({ error: "unauthorized" }, 401));
 		}
+		markClientSeen(env, ctx);
 
 		const [resource, ...rest] = vaultRoute.rest;
 		if (!resource) {

@@ -329,7 +329,7 @@ export function renderSetupPage(options: SetupPageOptions): string {
     <div id="success-flow" class="success-flow">
       <div style="text-align: center; margin-bottom: 32px;">
         <h1>Server Claimed!</h1>
-        <p>Keep this page open. Let's connect your vault.</p>
+        <p id="connect-status">Keep this page open. Let's connect your vault.</p>
       </div>
 
       <div class="flow-step">
@@ -539,6 +539,21 @@ export function renderSetupPage(options: SetupPageOptions): string {
         // Switch Views
         initialView.style.display = "none";
         successFlow.classList.add("show");
+
+        // Confirm automatically once the plugin makes its first
+        // authenticated request to this server.
+        var connectStatusEl = document.getElementById("connect-status");
+        var connectPoll = setInterval(function () {
+          fetch("/api/setup-status").then(function (r) { return r.json(); }).then(function (s) {
+            if (s && s.clientConnected) {
+              clearInterval(connectPoll);
+              if (connectStatusEl) {
+                connectStatusEl.textContent = "Device connected \\u2713 \\u2014 sync is up and running.";
+                connectStatusEl.style.color = "#88ffb8";
+              }
+            }
+          }).catch(function () { /* transient; keep polling */ });
+        }, 4000);
 
       } catch (error) {
         statusEl.textContent = error.message;
@@ -778,13 +793,18 @@ export function renderRunningPage(options: RunningPageOptions): string {
       <div class="badge ${options.snapshots ? "active" : "inactive"}">Snapshots: ${options.snapshots ? "ON" : "OFF"}</div>
     </div>
     <div class="resume" id="resume-section">
-      <h2>Finish connecting a device</h2>
-      <p>This browser still has your setup details from when you claimed the server. Scan the code on your phone, or connect this computer's Obsidian directly.</p>
-      <div class="resume-qr" id="resume-qr"></div>
-      <div class="resume-actions">
-        <a class="btn primary" id="resume-open" href="#">Connect Obsidian on this device</a>
-        <button class="btn" id="resume-copy">Copy setup link</button>
-        <button class="btn" id="resume-dismiss">Done — forget setup details</button>
+      <h2 id="resume-title">Finish connecting a device</h2>
+      <p id="resume-text">This browser still has your setup details from when you claimed the server. Scan the code on your phone, or connect this computer's Obsidian directly.</p>
+      <div id="resume-details">
+        <div class="resume-qr" id="resume-qr"></div>
+        <div class="resume-actions">
+          <a class="btn primary" id="resume-open" href="#">Connect Obsidian on this device</a>
+          <button class="btn" id="resume-copy">Copy setup link</button>
+        </div>
+      </div>
+      <div class="resume-actions" style="margin-top: 12px;">
+        <button class="btn" id="resume-toggle" style="display: none;">Show setup details</button>
+        <button class="btn" id="resume-dismiss">Forget setup details</button>
       </div>
     </div>
   </main>
@@ -800,9 +820,13 @@ export function renderRunningPage(options: RunningPageOptions): string {
       var host = bundle.host || window.location.origin;
 
       var section = document.getElementById("resume-section");
+      var titleEl = document.getElementById("resume-title");
+      var textEl = document.getElementById("resume-text");
+      var detailsEl = document.getElementById("resume-details");
       var qrEl = document.getElementById("resume-qr");
       var openBtn = document.getElementById("resume-open");
       var copyBtn = document.getElementById("resume-copy");
+      var toggleBtn = document.getElementById("resume-toggle");
       var dismissBtn = document.getElementById("resume-dismiss");
 
       var deepLink = "obsidian://lodestone?" + new URLSearchParams({ action: "setup", host: host, token: bundle.token, vaultId: bundle.vaultId }).toString();
@@ -815,9 +839,16 @@ export function renderRunningPage(options: RunningPageOptions): string {
           setTimeout(function () { copyBtn.textContent = "Copy setup link"; }, 2000);
         });
       });
+      toggleBtn.addEventListener("click", function () {
+        var hidden = detailsEl.style.display === "none";
+        detailsEl.style.display = hidden ? "" : "none";
+        toggleBtn.textContent = hidden ? "Hide setup details" : "Show setup details";
+      });
       dismissBtn.addEventListener("click", function () {
+        if (!window.confirm("Forget the saved setup details on this browser? The server only stores a hash of your token, so this is the only recovery copy outside Obsidian's own settings.")) return;
         try { localStorage.removeItem("lodestone-setup"); } catch (e) { /* ignore */ }
         section.classList.remove("show");
+        clearInterval(pollTimer);
       });
 
       if (window.QRious) {
@@ -826,6 +857,25 @@ export function renderRunningPage(options: RunningPageOptions): string {
         new window.QRious({ element: canvas, value: mobileUrl, size: 200, level: "M", foreground: "#08111d", background: "#ffffff" });
       }
       section.classList.add("show");
+
+      // Poll connection status: collapse to a recovery card once a device connects.
+      var connectedShown = false;
+      function applyConnected() {
+        if (connectedShown) return;
+        connectedShown = true;
+        titleEl.textContent = "Device connected \\u2713";
+        textEl.textContent = "Setup details stay saved in this browser. If you ever reset the connection in Obsidian, come back here to reconnect \\u2014 or forget them if you have a backup.";
+        detailsEl.style.display = "none";
+        toggleBtn.style.display = "";
+        clearInterval(pollTimer);
+      }
+      function checkStatus() {
+        fetch("/api/setup-status").then(function (r) { return r.json(); }).then(function (s) {
+          if (s && s.clientConnected) applyConnected();
+        }).catch(function () { /* transient; keep polling */ });
+      }
+      var pollTimer = setInterval(checkStatus, 4000);
+      checkStatus();
     })();
   </script>
 </body>

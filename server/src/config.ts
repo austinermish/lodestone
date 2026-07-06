@@ -3,6 +3,7 @@ const TOKEN_HASH_KEY = "tokenHash";
 const UPDATE_PROVIDER_KEY = "updateProvider";
 const UPDATE_REPO_URL_KEY = "updateRepoUrl";
 const UPDATE_REPO_BRANCH_KEY = "updateRepoBranch";
+const FIRST_CLIENT_AT_KEY = "firstClientAt";
 
 type UpdateProvider = "github" | "gitlab" | "unknown";
 
@@ -12,6 +13,8 @@ export interface StoredServerConfig {
 	updateProvider: UpdateProvider | null;
 	updateRepoUrl: string | null;
 	updateRepoBranch: string | null;
+	/** Epoch ms of the first successfully authenticated client request, or null. */
+	firstClientAt: number | null;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -114,6 +117,14 @@ export class ServerConfig {
 			});
 		}
 
+		if (request.method === "POST" && url.pathname === "/__lodestone/client-seen") {
+			const existing = await this.state.storage.get<number>(FIRST_CLIENT_AT_KEY);
+			if (typeof existing !== "number") {
+				await this.state.storage.put(FIRST_CLIENT_AT_KEY, Date.now());
+			}
+			return json({ ok: true });
+		}
+
 		if (request.method === "POST" && url.pathname === "/__lodestone/update-metadata") {
 			let body: {
 				updateProvider?: unknown;
@@ -162,7 +173,8 @@ export class ServerConfig {
 		const updateProvider = await txn.get<UpdateProvider>(UPDATE_PROVIDER_KEY);
 		const updateRepoUrl = await txn.get<string>(UPDATE_REPO_URL_KEY);
 		const updateRepoBranch = await txn.get<string>(UPDATE_REPO_BRANCH_KEY);
-		return this.buildConfig(claimed, tokenHash, updateProvider, updateRepoUrl, updateRepoBranch);
+		const firstClientAt = await txn.get<number>(FIRST_CLIENT_AT_KEY);
+		return this.buildConfig(claimed, tokenHash, updateProvider, updateRepoUrl, updateRepoBranch, firstClientAt);
 	}
 
 	private async readConfig(): Promise<StoredServerConfig> {
@@ -171,7 +183,8 @@ export class ServerConfig {
 		const updateProvider = await this.state.storage.get<UpdateProvider>(UPDATE_PROVIDER_KEY);
 		const updateRepoUrl = await this.state.storage.get<string>(UPDATE_REPO_URL_KEY);
 		const updateRepoBranch = await this.state.storage.get<string>(UPDATE_REPO_BRANCH_KEY);
-		return this.buildConfig(claimed, tokenHash, updateProvider, updateRepoUrl, updateRepoBranch);
+		const firstClientAt = await this.state.storage.get<number>(FIRST_CLIENT_AT_KEY);
+		return this.buildConfig(claimed, tokenHash, updateProvider, updateRepoUrl, updateRepoBranch, firstClientAt);
 	}
 
 	private buildConfig(
@@ -180,6 +193,7 @@ export class ServerConfig {
 		updateProvider: UpdateProvider | undefined,
 		updateRepoUrl: string | undefined,
 		updateRepoBranch: string | undefined,
+		firstClientAt: number | undefined,
 	): StoredServerConfig {
 		return {
 			claimed: claimed === true && typeof tokenHash === "string" && tokenHash.length > 0,
@@ -191,6 +205,7 @@ export class ServerConfig {
 			updateRepoUrl: typeof updateRepoUrl === "string" && updateRepoUrl.length > 0 ? updateRepoUrl : null,
 			updateRepoBranch:
 				typeof updateRepoBranch === "string" && updateRepoBranch.length > 0 ? updateRepoBranch : null,
+			firstClientAt: typeof firstClientAt === "number" ? firstClientAt : null,
 		};
 	}
 }
