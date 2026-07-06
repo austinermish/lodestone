@@ -43,6 +43,23 @@ async function waitForWorker() {
 	throw new Error("Timed out waiting for wrangler dev");
 }
 
+/** Same auth bootstrap as worker-integration.mjs: use the env token if the
+ * worker picked it up, otherwise claim the server and use the claim token. */
+async function resolveAuthToken(defaultEnvToken) {
+	const capabilities = await fetch(`${HOST}/api/capabilities`).then((r) => r.json());
+	if (capabilities?.claimed === true && capabilities?.authMode === "env") {
+		return defaultEnvToken;
+	}
+	const token = randomBytes(32).toString("hex");
+	const res = await fetch(`${HOST}/claim`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ token }),
+	});
+	if (!res.ok) throw new Error(`claim failed (${res.status})`);
+	return token;
+}
+
 /** Sync a Y.Doc into (or out of) a vault room over WebSocket via y-partyserver. */
 async function syncDoc(vaultId, token, ydoc, { pushOnly = false } = {}) {
 	const { default: YSyncProvider } = await import("y-partyserver/provider");
@@ -94,6 +111,7 @@ async function main() {
 	let failed = false;
 	try {
 		await waitForWorker();
+		const authToken = await resolveAuthToken(envToken);
 
 		// 1. Seed the hub with FILE_COUNT files.
 		const hubDoc = new Y.Doc();
@@ -111,7 +129,7 @@ async function main() {
 				meta.set(fileId, { path, mtime: 1700000000000 + i });
 			}
 		});
-		await syncDoc(HUB_VAULT, envToken, hubDoc, { pushOnly: true });
+		await syncDoc(HUB_VAULT, authToken, hubDoc, { pushOnly: true });
 		const hubDocSize = Y.encodeStateAsUpdate(hubDoc).byteLength;
 		console.log(`hub doc pushed: ${FILE_COUNT} files, encoded size ${(hubDocSize / 1024).toFixed(0)} KB`);
 		if (hubDocSize < 150_000) {
@@ -123,7 +141,7 @@ async function main() {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				Authorization: `Bearer ${envToken}`,
+				Authorization: `Bearer ${authToken}`,
 			},
 			body: JSON.stringify({ spokeVaultId: SPOKE_VAULT, deviceName: "seed-scale-test" }),
 		});
@@ -147,7 +165,7 @@ async function main() {
 
 		// 4. Connect a fresh client to the SPOKE vault and verify the DO was seeded.
 		const spokeDoc = new Y.Doc();
-		await syncDoc(SPOKE_VAULT, envToken, spokeDoc);
+		await syncDoc(SPOKE_VAULT, authToken, spokeDoc);
 		await wait(1000);
 		const spokeTexts = spokeDoc.getMap("idToText");
 		if (spokeTexts.size !== FILE_COUNT) {
