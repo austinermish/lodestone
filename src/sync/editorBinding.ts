@@ -1097,6 +1097,29 @@ export class EditorBindingManager {
 		// opened file. That stale content would otherwise propagate to all connected
 		// vaults via the CRDT.
 		const currentContent = file.stat.size === 0 ? "" : view.editor.getValue();
+		// Same stale-leaf hazard for NON-empty files: only trust the editor buffer
+		// when its length is plausible for the file's byte size (UTF-8: bytes >=
+		// chars, and <= 4 bytes/char + slack for BOM/CRLF). On mismatch, seed from
+		// disk asynchronously and rebind — never seed file B with file A's content.
+		if (currentContent.length > 0) {
+			const chars = currentContent.length;
+			const bytes = file.stat.size;
+			const plausible = bytes >= chars && bytes <= chars * 4 + 64;
+			if (!plausible) {
+				this.log(
+					`resolveBindingTarget: editor buffer implausible for "${file.path}" ` +
+					`(${chars} chars vs ${bytes} bytes on disk) — seeding from disk instead`,
+				);
+				this.trace?.("editor", "seed-buffer-mismatch", { path: crdtPath, chars, bytes, reason });
+				void view.app.vault.read(file).then((diskContent) => {
+					const seeded = this.vaultSync.ensureFile(crdtPath, diskContent, deviceName);
+					if (seeded) this.rebind(view, deviceName, `${reason}:disk-seed`);
+				}).catch((err: unknown) => {
+					this.log(`resolveBindingTarget: disk seed read failed for "${file.path}": ${String(err)}`);
+				});
+				return null;
+			}
+		}
 		const ytext = this.vaultSync.ensureFile(crdtPath, currentContent, deviceName);
 		if (!ytext) {
 			if (this.isHardTombstonedPath(crdtPath)) {

@@ -1023,8 +1023,10 @@ export class BlobSyncManager {
 		if (file instanceof TFile) {
 			try {
 				this.suppress(path);
-				await this.app.vault.delete(file);
-				this.log(`handleRemoteDelete: deleted "${path}" from disk`);
+				// Trash (not permanent delete): a bad remote tombstone must be
+				// recoverable. Respects the user's Obsidian trash preference.
+				await this.app.fileManager.trashFile(file);
+				this.log(`handleRemoteDelete: trashed "${path}"`);
 			} catch (err) {
 				console.error(
 					`[lodestone:blob] handleRemoteDelete failed for "${path}":`,

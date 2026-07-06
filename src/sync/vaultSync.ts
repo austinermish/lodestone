@@ -571,7 +571,7 @@ export class VaultSync {
 						device,
 					});
 					metaCreated++;
-					return;
+					continue;
 				}
 
 				const isDeleted = this.isFileMetaDeleted(currentMeta);
@@ -740,22 +740,69 @@ export class VaultSync {
 		});
 
 		const allOrphanIds = new Set([...orphanTextIds, ...orphanMetaIds]);
+		let conflictCopies = 0;
 		if (allOrphanIds.size > 0) {
+			const now = Date.now();
 			this.ydoc.transact(() => {
 				for (const fileId of allOrphanIds) {
+					// Collision-loser rescue: an id with active meta whose path is
+					// owned by another id (concurrent create on two devices). Its
+					// content is real user data — clone to a conflict-copy path
+					// instead of deleting, unless it matches the winner's content.
+					const meta = this.meta.get(fileId);
+					const metaPath = typeof meta?.path === "string" ? this.normPath(meta.path) : "";
+					if (meta && !this.isFileMetaDeleted(meta) && metaPath) {
+						const content = this.idToText.get(fileId)?.toJSON() ?? "";
+						const winnerId = this._pathIndex.get(metaPath);
+						const winnerContent = winnerId ? (this.idToText.get(winnerId)?.toJSON() ?? "") : "";
+						if (content.length > 0 && content !== winnerContent) {
+							const conflictPath = this.buildConflictCopyPath(metaPath, meta.device);
+							this.meta.set(fileId, {
+								path: conflictPath,
+								deleted: undefined,
+								deletedAt: undefined,
+								mtime: now,
+								device: meta.device ?? this._device,
+							});
+							this._pathIndex.set(conflictPath, fileId);
+							conflictCopies++;
+							this.log(
+								`integrity: rescued collision loser "${metaPath}" (id=${fileId}) as "${conflictPath}"`,
+							);
+							continue;
+						}
+					}
 					this.idToText.delete(fileId);
 					this.meta.delete(fileId);
+					orphansCleaned++;
 				}
 			}, ORIGIN_SEED);
 
-			orphansCleaned = allOrphanIds.size;
+			if (conflictCopies > 0) this._pathIndexesDirty = true;
 			this.log(
-				`integrity: cleaned ${orphansCleaned} orphaned entries ` +
-				`(${orphanTextIds.length} from idToText, ${orphanMetaIds.length} from meta)`,
+				`integrity: cleaned ${orphansCleaned} orphaned entries, ` +
+				`rescued ${conflictCopies} collision loser(s) as conflict copies`,
 			);
 		}
 
 		return { duplicateIds, orphansCleaned };
+	}
+
+	/** Build a unique "<name> (conflict from <device>).md" path next to the original. */
+	private buildConflictCopyPath(path: string, device?: string): string {
+		const dot = path.lastIndexOf(".");
+		const slash = path.lastIndexOf("/");
+		const hasExt = dot > slash;
+		const base = hasExt ? path.slice(0, dot) : path;
+		const ext = hasExt ? path.slice(dot) : "";
+		const label = device && device.trim() ? device.trim() : "another device";
+		let candidate = `${base} (conflict from ${label})${ext}`;
+		let n = 2;
+		while (this._pathIndex.has(candidate) || this._deletedPathIndex.has(candidate)) {
+			candidate = `${base} (conflict from ${label} ${n})${ext}`;
+			n++;
+		}
+		return candidate;
 	}
 
 	// -------------------------------------------------------------------
@@ -1447,7 +1494,9 @@ export class VaultSync {
 	destroy(): void {
 		this.log("Destroying VaultSync");
 		if (this._renameTimer) clearTimeout(this._renameTimer);
-		this.clearPendingRenames();
+		// Flush (not drop) renames still in the batch window — a dropped rename
+		// resurrects the old path as a duplicate note on next reconcile.
+		this.flushRenameBatch();
 		this.provider.disconnect();
 		this.provider.destroy();
 		void this.persistence.destroy();

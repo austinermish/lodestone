@@ -432,6 +432,13 @@ export class DiskMirror {
 	}
 
 	private async flushWriteUnlocked(path: string, force: boolean): Promise<void> {
+		// Re-check under the lock: a remote tombstone may have landed while this
+		// flush waited in the chain. Writing now would recreate a deleted file
+		// that reconcile skips forever (permanent ghost).
+		if (this.vaultSync.isPathTombstoned(path)) {
+			this.log(`flushWrite: "${path}" tombstoned while queued, skipping`);
+			return;
+		}
 		const ytext = this.vaultSync.getTextForPath(path);
 		if (!ytext) {
 			this.log(`flushWrite: no Y.Text for "${path}", skipping`);
@@ -576,19 +583,24 @@ export class DiskMirror {
 		// Unbind editor before suppressed delete so the vault `delete` event
 		// (which skips unbind due to suppression) doesn't leave a stale binding.
 		this.editorBindings.unbindByPath(diskNormalized);
-		const file = this.app.vault.getAbstractFileByPath(diskNormalized);
-		if (file instanceof TFile) {
+		// Take the per-path write lock so an in-flight flush for this path
+		// completes (and re-checks the tombstone) before the disk delete —
+		// otherwise the flush can recreate the file after we remove it.
+		await this.runPathWriteLocked(normalized, async () => {
+			const file = this.app.vault.getAbstractFileByPath(diskNormalized);
+			if (!(file instanceof TFile)) return;
 			try {
 				this.suppressDelete(path);
-				await this.app.vault.delete(file);
-				this.log(`handleRemoteDelete: deleted "${path}" from disk`);
+				// Trash (not permanent delete) so a bad remote tombstone is recoverable.
+				await this.app.fileManager.trashFile(file);
+				this.log(`handleRemoteDelete: trashed "${path}"`);
 			} catch (err) {
 				console.error(
 					`[lodestone] handleRemoteDelete failed for "${path}":`,
 					err,
 				);
 			}
-		}
+		});
 	}
 
 	private async handleRemoteRename(oldPath: string, newPath: string): Promise<void> {
@@ -623,13 +635,17 @@ export class DiskMirror {
 
 		this.editorBindings.updatePathsAfterRename(new Map([[oldDiskNormalized, newDiskNormalized]]));
 
-		const oldFile = this.app.vault.getAbstractFileByPath(oldDiskNormalized);
-		if (oldFile instanceof TFile) {
+		// Take the old path's write lock so an in-flight flush for it completes
+		// before the file moves — otherwise the flush recreates the old path.
+		await this.runPathWriteLocked(oldNormalized, async () => {
+			const oldFile = this.app.vault.getAbstractFileByPath(oldDiskNormalized);
+			if (!(oldFile instanceof TFile)) return;
 			try {
 				const target = this.app.vault.getAbstractFileByPath(newDiskNormalized);
 				if (target instanceof TFile) {
 					this.suppressDelete(oldPath);
-					await this.app.vault.delete(oldFile);
+					// Trash: the old file's content may differ from the rename target.
+					await this.app.fileManager.trashFile(oldFile);
 				} else {
 					const dir = newDiskNormalized.substring(0, newDiskNormalized.lastIndexOf("/"));
 					if (dir) {
@@ -661,7 +677,7 @@ export class DiskMirror {
 			} catch (err) {
 				console.error(`[lodestone] handleRemoteRename failed for "${oldDiskNormalized}" -> "${newDiskNormalized}":`, err);
 			}
-		}
+		});
 
 		// Only write/observe the new path if it is syncable on this device.
 		// A remote rename into an excluded folder should not create the file locally.
