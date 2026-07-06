@@ -17,6 +17,12 @@
 
 ## Phase 1 — Critical data-loss & correctness fixes (plugin core)
 
+> **STATUS: EXECUTED 2026-07-06 as v3.0.4** (all items 1.1–1.10, plus 10.1's
+> js-yaml bump pulled forward). New regression suite:
+> `tests/phase1-critical-fixes-regressions.mjs` (covers 1.1, 1.3, 1.6);
+> growth-burst/removal calibration covered in the updated
+> `tests/frontmatter-guard-regressions.mjs`.
+
 Ship these as one or two patch releases before anything else.
 
 ### 1.1 `migrateSchemaToV2` aborts mid-transaction *(one-word fix — do first)*
