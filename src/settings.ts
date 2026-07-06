@@ -755,7 +755,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			callout.createDiv({ cls: "callout-title" }).createSpan({ text: "Connection required" });
 			const calloutContent = callout.createDiv({ cls: "callout-content" });
 			calloutContent.createEl("p", {
-				text: "YAOS needs a Cloudflare Worker (host) to sync your vault. Deployment is free and takes about 15 seconds.",
+				text: "Lodestone needs a Cloudflare Worker (host) to sync your vault. Deployment is free and takes about 15 seconds.",
 			});
 			calloutContent.createEl("p", {
 				text: "After deployment, open your host URL in a browser, claim the server, then use the setup link.",
@@ -954,7 +954,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 					? "A migration-sensitive server update is available. Use the guided update path."
 					: "A server update is available."
 				: updateState.pluginUpdateRecommended
-					? "This device should update the YAOS plugin soon."
+					? "This device should update the Lodestone plugin soon."
 					: "Server is up to date.";
 			updateCard.createEl("p", { text: summaryText, cls: "yaos-settings-status-subtitle" });
 			if (!updateState.updateRepoUrl) {

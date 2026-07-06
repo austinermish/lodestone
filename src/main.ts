@@ -123,7 +123,7 @@ function applyReverseAlias(localPath: string, aliases: Record<string, string>): 
 
 function buildGithubOpsBootstrapWorkflowYaml(): string {
 	return [
-		"name: YAOS Server Ops",
+		"name: Lodestone Server Ops",
 		"on:",
 		"  workflow_dispatch:",
 		"    inputs:",
@@ -335,7 +335,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	private awaitingFirstProviderSyncAfterStartup = false;
 	/** Host workspace/layout reached a usable post-boot state. */
 	private blobDownloadGateLayoutReady = false;
-	/** YAOS startup/reconciliation has completed enough to trust local attachment presence checks. */
+	/** Lodestone startup/reconciliation has completed enough to trust local attachment presence checks. */
 	private blobDownloadGateStartupReady = false;
 
 	private isMarkdownPathSyncable(path: string): boolean {
@@ -478,10 +478,10 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		if (!this.settings.token) {
 			this.log("Token not configured — sync disabled");
 			const message = this.serverAuthMode === "env"
-				? "YAOS: configure the server token in settings to enable sync."
+				? "Lodestone: configure the server token in settings to enable sync."
 				: this.serverAuthMode === "claim" || this.serverAuthMode === "unclaimed"
-						? "YAOS: claim the server in a browser, then use the YAOS setup link to fill in the token."
-						: "YAOS: configure a token in settings, or claim the server in a browser first.";
+						? "Lodestone: claim the server in a browser, then use the Lodestone setup link to fill in the token."
+						: "Lodestone: configure a token in settings, or claim the server in a browser first.";
 			new Notice(message, 10000);
 			finishOnload("missing-token");
 			return;
@@ -675,7 +675,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			const schemaError = this.vaultSync.checkSchemaVersion();
 			if (schemaError) {
 				console.error(`[yaos] ${schemaError}`);
-				new Notice(`YAOS: ${schemaError}`);
+				new Notice(`Lodestone: ${schemaError}`);
 				this.updateStatusBar("error");
 				return;
 			}
@@ -745,7 +745,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			await this.startAllRooms();
 		} catch (err) {
 			console.error("[yaos] Failed to initialize sync:", err);
-			new Notice(`YAOS: failed to initialize — ${formatUnknown(err)}`);
+			new Notice(`Lodestone: failed to initialize — ${formatUnknown(err)}`);
 			this.updateStatusBar("error");
 		}
 	}
@@ -1081,7 +1081,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			}
 			if (oversizedCount > 0) {
 				this.log(`reconcile: skipped ${oversizedCount} oversized files`);
-				new Notice(`YAOS: skipped ${oversizedCount} files exceeding ${this.settings.maxFileSizeKB} KB size limit.`);
+				new Notice(`Lodestone: skipped ${oversizedCount} files exceeding ${this.settings.maxFileSizeKB} KB size limit.`);
 			}
 			if (skippedByIndex > 0) {
 				this.log(`reconcile: ${skippedByIndex} files unchanged (stat match), ${changed.length} changed`);
@@ -1120,7 +1120,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					this.log(`Reconcile safety brake: ${safetyBrakeReason}.`);
 					console.error(`[yaos] Reconcile safety brake: ${safetyBrakeReason}.`);
 					new Notice(
-						`YAOS: Reconcile safety brake — ${safetyBrakeReason}. ` +
+						`Lodestone: Reconcile safety brake — ${safetyBrakeReason}. ` +
 						`Additive creates will continue. Export diagnostics and inspect logs.`,
 					);
 				}
@@ -1263,7 +1263,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		this.log(`Imported ${imported} previously untracked files`);
 
 		if (imported > 0) {
-			new Notice(`YAOS: imported ${imported} files after server sync.`);
+			new Notice(`Lodestone: imported ${imported} files after server sync.`);
 		}
 	}
 
@@ -1668,7 +1668,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					} else if (!this.serverSupportsAttachments && !this.shownAttachmentNudge) {
 						this.shownAttachmentNudge = true;
 						new Notice(
-							"YAOS: This file won't sync yet — attachment sync needs a Cloudflare R2 bucket. Open YAOS settings for a 1-minute setup guide.",
+							"Lodestone: This file won't sync yet — attachment sync needs a Cloudflare R2 bucket. Open Lodestone settings for a 1-minute setup guide.",
 							10000,
 						);
 					}
@@ -2013,7 +2013,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 						this.log("Nuclear reset: reinitializing (will re-seed from disk)");
 						await this.initSync();
 							new Notice(
-								`YAOS: nuclear reset complete. ` +
+								`Lodestone: nuclear reset complete. ` +
 								`Re-seeded ${this.vaultSync?.getActiveMarkdownPaths().length ?? 0} files from disk.`,
 							);
 					},
@@ -2698,7 +2698,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 
 	private showFrontmatterGuardNotice(path: string): void {
 		new Notice(
-			`YAOS paused a properties update in "${path}" because the frontmatter looked unsafe. Check diagnostics before accepting the change.`,
+			`Lodestone paused a properties update in "${path}" because the frontmatter looked unsafe. Check diagnostics before accepting the change.`,
 			12_000,
 		);
 	}
@@ -3335,7 +3335,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const vaultId = this.settings.vaultId?.trim();
 		if (!host || !token || !vaultId) return null;
 		return [
-			"YAOS Recovery Kit",
+			"Lodestone Recovery Kit",
 			`Created: ${new Date().toISOString()}`,
 			"",
 			`Host: ${host}`,
@@ -3755,7 +3755,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 
 		const minPluginVersion = this.serverCapabilities.minPluginVersion;
 		if (minPluginVersion && compareSemver(this.manifest.version, minPluginVersion) === -1) {
-			return `This server requires YAOS plugin ${minPluginVersion} or newer. Update this plugin before syncing.`;
+			return `This server requires Lodestone plugin ${minPluginVersion} or newer. Update this plugin before syncing.`;
 		}
 
 		const minSchemaVersion = this.serverCapabilities.minSchemaVersion;
@@ -3778,7 +3778,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const pluginVsLatest = compareSemver(this.manifest.version, latestPluginVersion);
 		const serverVsRequired = compareSemver(serverVersion, minCompatibleServer);
 		if (pluginVsLatest !== null && serverVsRequired !== null && pluginVsLatest >= 0 && serverVsRequired === -1) {
-			return `This plugin requires YAOS server ${minCompatibleServer} or newer. Update server first.`;
+			return `This plugin requires Lodestone server ${minCompatibleServer} or newer. Update server first.`;
 		}
 		return null;
 	}
@@ -3797,7 +3797,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		this.compatibilityBlockReason = blockReason;
 		this.log(`Compatibility guard (${reason}): ${blockReason}`);
 		if (firstBlock) {
-			new Notice(`YAOS: ${blockReason}`, 12000);
+			new Notice(`Lodestone: ${blockReason}`, 12000);
 		}
 
 		if (this.vaultSync) {
@@ -3921,8 +3921,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		if (gainedR2) {
 			new Notice(
 				this.settings.enableAttachmentSync
-					? "YAOS: R2 backend detected. Attachments and snapshots are now available."
-					: "YAOS: R2 backend detected. Attachments and snapshots are available if you enable them in settings.",
+					? "Lodestone: R2 backend detected. Attachments and snapshots are now available."
+					: "Lodestone: R2 backend detected. Attachments and snapshots are available if you enable them in settings.",
 				7000,
 			);
 			if (this.vaultSync?.connected && this.vaultSync.providerSynced && this.serverSupportsSnapshots) {
@@ -4046,16 +4046,16 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			if (this.lastServerUpdateNoticeVersion !== updateState.latestServerVersion) {
 				if (!updateState.updateActionUrl) {
 					new Notice(
-						`YAOS: server update ${updateState.latestServerVersion} is available. ` +
-						"Set your deployment repo URL in YAOS settings to enable 1-click updates.",
+						`Lodestone: server update ${updateState.latestServerVersion} is available. ` +
+						"Set your deployment repo URL in Lodestone settings to enable 1-click updates.",
 						12000,
 					);
 				} else {
 					const actionLabel = updateState.updateActionLabel;
 					new Notice(
 						updateState.migrationRequired
-							? `YAOS: a server migration update (${updateState.latestServerVersion}) is available. Open ${actionLabel} before updating.`
-							: `YAOS: a server update (${updateState.latestServerVersion}) is available. Open ${actionLabel} to update when ready.`,
+							? `Lodestone: a server migration update (${updateState.latestServerVersion}) is available. Open ${actionLabel} before updating.`
+							: `Lodestone: a server update (${updateState.latestServerVersion}) is available. Open ${actionLabel} to update when ready.`,
 						10000,
 					);
 				}
@@ -4069,7 +4069,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		if (updateState.pluginUpdateRecommended && updateState.latestPluginVersion) {
 			if (this.lastPluginUpdateNoticeVersion !== updateState.latestPluginVersion) {
 				new Notice(
-					`YAOS: plugin update recommended (${updateState.latestPluginVersion}). Update this device to stay current with server compatibility guidance.`,
+					`Lodestone: plugin update recommended (${updateState.latestPluginVersion}). Update this device to stay current with server compatibility guidance.`,
 					10000,
 				);
 				this.lastPluginUpdateNoticeVersion = updateState.latestPluginVersion;
@@ -4141,7 +4141,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const minPluginVersion = this.serverCapabilities?.minPluginVersion ?? null;
 		if (minPluginVersion && compareSemver(this.manifest.version, minPluginVersion) === -1) {
 			pluginCompatibilityWarning =
-				`This server requires YAOS plugin ${minPluginVersion} or newer.`;
+				`This server requires Lodestone plugin ${minPluginVersion} or newer.`;
 		} else {
 			const minSchemaVersion = this.serverCapabilities?.minSchemaVersion ?? null;
 			const maxSchemaVersion = this.serverCapabilities?.maxSchemaVersion ?? null;
@@ -4170,7 +4170,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				? effectiveProvider === "gitlab"
 					? "your GitLab pipeline"
 					: "your GitHub workflow"
-				: "YAOS settings",
+				: "Lodestone settings",
 			legacyServerDetected: this.legacyServerDetected,
 			pluginCompatibilityWarning,
 		};
@@ -4392,8 +4392,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					? ` (client=${details.clientSchemaVersion ?? "unknown"}, room=${details.roomSchemaVersion ?? "unknown"})`
 					: "";
 			new Notice(
-				`YAOS: this vault was upgraded by a newer plugin schema${detailText}. ` +
-				"Update YAOS on this device to continue syncing.",
+				`Lodestone: this vault was upgraded by a newer plugin schema${detailText}. ` +
+				"Update Lodestone on this device to continue syncing.",
 				12000,
 			);
 			return;
@@ -4701,8 +4701,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		new ConfirmModal(
 			this.app,
 			"Migrate sync schema to v2",
-			"This will switch this vault to schema v2 and block older YAOS clients from syncing " +
-			"until they are upgraded. YAOS will export diagnostics before and after migration. Continue?",
+			"This will switch this vault to schema v2 and block older Lodestone clients from syncing " +
+			"until they are upgraded. Lodestone will export diagnostics before and after migration. Continue?",
 			async () => {
 				if (!this.vaultSync) return;
 
@@ -4735,9 +4735,9 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				}
 
 				new Notice(
-					`YAOS: schema v2 migration complete` +
+					`Lodestone: schema v2 migration complete` +
 					(loserCleanupCount > 0 ? ` (${loserCleanupCount} local alias file(s) cleaned).` : ".") +
-					" Update YAOS on your other devices before reconnecting them.",
+					" Update Lodestone on your other devices before reconnecting them.",
 					12000,
 				);
 			},
@@ -4776,7 +4776,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 
 		const startedAt = Date.now();
 		const runId = `${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(16).slice(2, 8)}`;
-		const rootDir = normalizePath(`YAOS QA/vfs-torture-${runId}`);
+		const rootDir = normalizePath(`Lodestone QA/vfs-torture-${runId}`);
 		const steps: Array<{
 			name: string;
 			status: "ok" | "error" | "skipped";
@@ -4838,7 +4838,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			const burstPath = normalizePath(`${rootDir}/burst.md`);
 			const burstFile = await this.app.vault.create(
 				burstPath,
-				"# YAOS burst test\n\nStart of burst edits.",
+				"# Lodestone burst test\n\nStart of burst edits.",
 			);
 			for (let i = 1; i <= 10; i++) {
 				const current = await this.app.vault.read(burstFile);
@@ -4961,7 +4961,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 
 		if (failures.length > 0) {
 			new Notice(
-				`YAOS VFS torture run finished with ${failures.length} failed step(s). Report: ${outPath}`,
+				`Lodestone VFS torture run finished with ${failures.length} failed step(s). Report: ${outPath}`,
 				12000,
 			);
 			this.log(
@@ -4970,7 +4970,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			return;
 		}
 
-		new Notice(`YAOS VFS torture run completed. Report: ${outPath}`, 10000);
+		new Notice(`Lodestone VFS torture run completed. Report: ${outPath}`, 10000);
 		this.log(`VFS torture: completed successfully. Report=${outPath}`);
 	}
 
@@ -5215,8 +5215,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		}
 
 		const notice = kind === "quota_exceeded"
-			? "YAOS: Device storage is full. Sync durability is degraded and attachment transfers are paused. Free up storage, then restart Obsidian."
-			: "YAOS: IndexedDB persistence failed. Sync durability is degraded and attachment transfers are paused.";
+			? "Lodestone: Device storage is full. Sync durability is degraded and attachment transfers are paused. Free up storage, then restart Obsidian."
+			: "Lodestone: IndexedDB persistence failed. Sync durability is degraded and attachment transfers are paused.";
 		new Notice(notice, 12000);
 	}
 }

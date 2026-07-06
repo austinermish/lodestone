@@ -1,6 +1,6 @@
 {
 	"id": "yaos",
-	"name": "YAOS",
+	"name": "Lodestone",
 	"version": "2.6.1",
 	"minAppVersion": "1.5.0",
 	"description": "A zero-terminal, real-time sync engine powered by your own Cloudflare Worker.",
