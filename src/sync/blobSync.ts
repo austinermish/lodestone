@@ -296,6 +296,9 @@ export class BlobSyncManager {
 	/** Path suppression to prevent upload-on-own-download loops. */
 	private suppressedPaths = new Map<string, number>();
 
+	/** Set by destroy(); background verification loops check it to bail. */
+	private destroyed = false;
+
 	/** Completed transfer counts (reset each reconcile cycle). */
 	private _completedUploads = 0;
 	private _completedDownloads = 0;
@@ -529,6 +532,7 @@ export class BlobSyncManager {
 
 		// Disk blobs not in CRDT → schedule upload (authoritative only)
 		// Disk blobs IN CRDT but with different hash → schedule upload (content changed offline)
+		const sameSizeCandidates: Array<{ path: string; file: TFile; refHash: string }> = [];
 		for (const [path, file] of diskBlobs) {
 			// Check tombstone
 			if (this.vaultSync.isBlobTombstoned(path)) {
@@ -555,9 +559,13 @@ export class BlobSyncManager {
 							// No cache, but size differs — definitely changed
 							this.enqueueUpload(path, 0, file.stat.size);
 							uploadQueued++;
+						} else {
+							// Sizes match with no cache entry. An offline edit that
+							// kept the byte size (common for image re-exports) never
+							// produces a future modify event — verify by hash in the
+							// background (one-time cost that also populates the cache).
+							sameSizeCandidates.push({ path, file, refHash: ref.hash });
 						}
-						// If sizes match and no cache, skip — processUpload will
-						// do a full hash check if triggered by a future modify event
 					}
 				}
 				continue;
@@ -582,12 +590,46 @@ export class BlobSyncManager {
 		if (uploadQueued > 0) this.kickUploadDrain();
 		if (downloadQueued > 0) this.kickDownloadDrain();
 
+		if (sameSizeCandidates.length > 0) {
+			void this.verifySameSizeCandidates(sameSizeCandidates);
+		}
+
 		this.log(
 			`reconcile: ${uploadQueued} uploads queued, ` +
 			`${downloadQueued} downloads queued, ${skipped} skipped`,
 		);
 
 		return { uploadQueued, downloadQueued, skipped };
+	}
+
+	/**
+	 * Background hash verification for reconcile candidates whose size matches
+	 * the CRDT ref but have no hash-cache entry (offline edits that kept the
+	 * byte size never fire a modify event). Populates the cache either way and
+	 * queues an upload on mismatch.
+	 */
+	private async verifySameSizeCandidates(
+		candidates: Array<{ path: string; file: TFile; refHash: string }>,
+	): Promise<void> {
+		let mismatches = 0;
+		for (const { path, file, refHash } of candidates) {
+			if (this.destroyed) return;
+			try {
+				const data = await this.app.vault.readBinary(file);
+				const hash = await hashArrayBuffer(data);
+				setCachedHash(this.hashCache, path, { mtime: file.stat.mtime, size: file.stat.size }, hash);
+				if (hash !== refHash) {
+					this.enqueueUpload(path, 0, file.stat.size);
+					mismatches++;
+				}
+			} catch (err) {
+				this.log(`verifySameSizeCandidates: hash failed for "${path}": ${String(err)}`);
+			}
+		}
+		if (mismatches > 0) {
+			this.log(`verifySameSizeCandidates: ${mismatches}/${candidates.length} same-size files changed offline, uploads queued`);
+			this.kickUploadDrain();
+		}
 	}
 
 	// -------------------------------------------------------------------
@@ -1253,6 +1295,7 @@ export class BlobSyncManager {
 	// -------------------------------------------------------------------
 
 	destroy(): void {
+		this.destroyed = true;
 		for (const cleanup of this.observerCleanups) {
 			cleanup();
 		}

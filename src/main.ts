@@ -1986,7 +1986,20 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					`Other connected devices will also see the reset. This cannot be undone. Continue?`,
 						async () => {
 							this.log("Nuclear reset: starting");
-							new Notice("Nuclear reset in progress...");
+
+						// The reset only works if the deletions actually reach the
+						// server — otherwise the reseed merges against surviving
+						// server state. Refuse to start while disconnected.
+						if (!this.vaultSync!.connected || !this.vaultSync!.providerSynced) {
+							new Notice(
+								"Nuclear reset aborted: not connected to the sync server. " +
+								"Reconnect first so the reset can propagate.",
+								10000,
+							);
+							this.log("Nuclear reset: aborted (provider not connected/synced)");
+							return;
+						}
+						new Notice("Nuclear reset in progress...");
 
 						// Clear CRDT maps BEFORE teardown so the deletions propagate
 						// to the server while the provider is still connected.
@@ -1997,8 +2010,19 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 							`${counts.blobCount} blob paths`,
 						);
 
-						// Give the provider a moment to sync the deletions to server
-						await new Promise((r) => setTimeout(r, 500));
+						// Give the socket time to flush the deletions, and verify the
+						// connection survived the window — a drop here means the
+						// deletions may not have reached the server.
+						await new Promise((r) => setTimeout(r, 1500));
+						if (!this.vaultSync!.connected) {
+							new Notice(
+								"Nuclear reset: connection dropped while propagating deletions. " +
+								"The server may still hold old state — run the reset again once reconnected.",
+								12000,
+							);
+							this.log("Nuclear reset: connection lost during propagation window");
+							return;
+						}
 
 						const vaultId = this.settings.vaultId;
 						this.teardownSync();
@@ -5110,33 +5134,51 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					if (!this.vaultSync) return;
 
 					// --- Pre-restore backup ---
-					// Save current content of files we're about to overwrite
-					// so the user can recover if the restore goes wrong.
+					// Save current content of files we're about to overwrite so the
+					// user can recover if the restore goes wrong. The config dir is
+					// invisible to the Vault API, so this must use the adapter
+					// (same pattern as the diagnostics exporter).
 					const backupDir = normalizePath(
 						`${this.app.vault.configDir}/plugins/lodestone/restore-backups/${new Date().toISOString().replace(/[:.]/g, "-")}`,
 					);
 					let backedUp = 0;
+					let backupFailures = 0;
 					for (const path of markdownPaths) {
 						try {
 							const file = this.app.vault.getAbstractFileByPath(path);
 							if (file instanceof TFile) {
 								const content = await this.app.vault.read(file);
-								const backupPath = `${backupDir}/${path}`;
-								// Ensure parent directories exist
+								const backupPath = normalizePath(`${backupDir}/${path}`);
 								const parentDir = backupPath.substring(0, backupPath.lastIndexOf("/"));
-								if (parentDir && !this.app.vault.getAbstractFileByPath(parentDir)) {
-									await this.app.vault.createFolder(parentDir);
+								if (parentDir) {
+									// mkdir each segment — mobile adapters don't create parents.
+									let cur = "";
+									for (const seg of parentDir.split("/")) {
+										cur = cur ? `${cur}/${seg}` : seg;
+										if (!(await this.app.vault.adapter.exists(cur))) {
+											await this.app.vault.adapter.mkdir(cur);
+										}
+									}
 								}
-								await this.app.vault.create(backupPath, content);
+								await this.app.vault.adapter.write(backupPath, content);
 								backedUp++;
 							}
 						} catch (err) {
-							// Non-fatal: file might not exist on disk (undelete case)
+							// File might legitimately not exist on disk (undelete case),
+							// but a read/write failure on an existing file is a real miss.
+							backupFailures++;
 							this.log(`Backup skipped for "${path}": ${formatUnknown(err)}`);
 						}
 					}
 					if (backedUp > 0) {
 						this.log(`Pre-restore backup: ${backedUp} files saved to ${backupDir}`);
+					}
+					if (backupFailures > 0) {
+						new Notice(
+							`Restore: ${backupFailures} file(s) could not be backed up first — ` +
+							"check the console before trusting this restore.",
+							10000,
+						);
 					}
 
 					const result = restoreFromSnapshot(snapshotDoc, this.vaultSync.ydoc, {

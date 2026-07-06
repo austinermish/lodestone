@@ -51,6 +51,17 @@ export function validateFrontmatterTransition(
 	const previousLength = previousBlock.kind === "present" ? previousBlock.frontmatterText.length : null;
 
 	if (next.kind === "none") {
+		// Wholesale frontmatter removal is the classic CRDT-merge corruption
+		// symptom — surface it as a warning (users do legitimately delete
+		// frontmatter, so never block).
+		if (previousLength != null && previousLength > 32) {
+			return {
+				risk: "warn",
+				reasons: ["frontmatter-removed"],
+				frontmatterLength: null,
+				previousFrontmatterLength: previousLength,
+			};
+		}
 		return {
 			risk: "ok",
 			reasons: [],
@@ -75,18 +86,26 @@ export function validateFrontmatterTransition(
 	addReasons(warnReasons, heuristicAnalysis.warnReasons);
 
 	const nextLength = next.frontmatterText.length;
-	if (
+	const growthBurst =
 		previousLength != null
 		&& previousLength > 0
 		&& nextLength > previousLength * 2
-		&& nextLength - previousLength > 128
-	) {
-		blockReasons.add("frontmatter-growth-burst");
-	}
+		&& nextLength - previousLength > 128;
 
 	const parsedNext = parseFrontmatter(next.frontmatterText);
 	addReasons(blockReasons, parsedNext.blockReasons);
 	addReasons(warnReasons, parsedNext.warnReasons);
+
+	if (growthBurst) {
+		// Large growth alone is normal (Templater expansion, property paste,
+		// bulk tag adds). Only block when the grown frontmatter is ALSO
+		// structurally suspect; clean YAML downgrades to a warning.
+		if (blockReasons.size > 0 || !parsedNext.root) {
+			blockReasons.add("frontmatter-growth-burst");
+		} else {
+			warnReasons.add("frontmatter-growth-burst");
+		}
+	}
 
 	if (parsedNext.root) {
 		const parsedPrevious =

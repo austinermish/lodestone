@@ -144,8 +144,10 @@ console.log("\n--- Test 6: malformed frontmatter fence is blocked ---");
 	);
 }
 
-console.log("\n--- Test 7: frontmatter growth burst is blocked ---");
+console.log("\n--- Test 7: frontmatter growth burst calibration ---");
 {
+	// Clean-YAML growth (Templater expansion, property paste) must WARN, not
+	// block — blocking here stopped legitimate user edits from syncing.
 	const previous = [
 		"---",
 		"title: Short",
@@ -160,8 +162,43 @@ console.log("\n--- Test 7: frontmatter growth burst is blocked ---");
 		"body",
 	].join("\n");
 	const result = validateFrontmatterTransition(previous, next);
-	assert(isFrontmatterBlocked(result), "large frontmatter-only growth burst is blocked");
+	assert(!isFrontmatterBlocked(result), "clean-YAML growth burst is not blocked");
+	assert(result.risk === "warn", "clean-YAML growth burst downgrades to warn");
 	assert(result.reasons.includes("frontmatter-growth-burst"), "growth burst reason is reported");
+
+	// Growth combined with a structural anomaly (duplicate key) still blocks.
+	const suspectNext = [
+		"---",
+		"title: Short",
+		`notes: ${"x".repeat(300)}`,
+		"title: Duplicated",
+		"---",
+		"body",
+	].join("\n");
+	const suspectResult = validateFrontmatterTransition(previous, suspectNext);
+	assert(isFrontmatterBlocked(suspectResult), "growth + structural anomaly is still blocked");
+	assert(suspectResult.reasons.includes("frontmatter-growth-burst"), "growth reason retained on block");
+}
+
+console.log("\n--- Test 7b: wholesale frontmatter removal warns ---");
+{
+	const previous = [
+		"---",
+		"title: A note",
+		"tags: [alpha, beta, gamma]",
+		"created: 2026-01-01",
+		"---",
+		"body",
+	].join("\n");
+	const result = validateFrontmatterTransition(previous, "body");
+	assert(!isFrontmatterBlocked(result), "frontmatter removal is not blocked");
+	assert(result.risk === "warn", "large frontmatter removal warns");
+	assert(result.reasons.includes("frontmatter-removed"), "removal reason is reported");
+
+	// Removing a tiny frontmatter block stays silent.
+	const tinyPrevious = ["---", "x: 1", "---", "body"].join("\n");
+	const tinyResult = validateFrontmatterTransition(tinyPrevious, "body");
+	assert(tinyResult.risk === "ok", "tiny frontmatter removal stays ok");
 }
 
 console.log("\n--- Test 8: extractor separates frontmatter and body ---");
