@@ -49,16 +49,19 @@ async function syncDoc(vaultId, token, ydoc, { pushOnly = false } = {}) {
 	const provider = new YSyncProvider(HOST, vaultId, ydoc, {
 		prefix: `/vault/sync/${encodeURIComponent(vaultId)}`,
 		params: { token, schemaVersion: "2" },
-		WebSocketPolyfill: WebSocket,
+		WebSocketPolyfill: globalThis.WebSocket ?? WebSocket,
 		connect: true,
 	});
+	provider.on("status", (event) => console.log(`  [${vaultId}] provider status: ${event.status}`));
 	await new Promise((resolvePromise, rejectPromise) => {
 		const timeout = setTimeout(() => rejectPromise(new Error(`sync timeout for ${vaultId}`)), 30_000);
-		provider.on("sync", (synced) => {
+		const check = (synced) => {
 			if (!synced) return;
 			clearTimeout(timeout);
 			resolvePromise();
-		});
+		};
+		provider.on("sync", check);
+		if (provider.synced) check(true);
 	});
 	// Give the server a moment to persist the pushed state before disconnect.
 	if (pushOnly) await wait(1500);
