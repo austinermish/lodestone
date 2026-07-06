@@ -304,10 +304,12 @@ Treat 4.1–4.2 as security work.
   connection differs from the invite's host cannot join at all (join now aborts with
   an honest notice; previously it silently "joined" a nonexistent room on the wrong
   server).
-- **Wanted** (Austin's chain scenario: V1 hub → V2 spoke, V2 also hub for V3, each
-  potentially on its own worker): store `host`/`token` per room in `RoomConfig`,
-  route each room's VaultSync/DiskMirror/blob traffic to its room's server, and keep
-  the Connection section strictly for the vault's own device sync. Depends on
+- **DECIDED (Austin, 2026-07-06): each hub runs its own worker.** Every hub↔spokes
+  relationship is fully independent — a spoke that becomes a hub deploys its own
+  worker for its own room; that instance is completely separate from the room it
+  spokes into. Implementation: store `host`/`token` per room in `RoomConfig`, route
+  each room's VaultSync/DiskMirror/blob traffic to its room's server, and keep the
+  Connection section strictly for the vault's own device sync. Depends on
   room-scoped tokens (4.2) to avoid handing every spoke the master token of every
   server in the chain.
 - **Status note**: seeding bug 2.1 was FIXED in 3.0.3 (chunked base64 + seed push
