@@ -730,16 +730,54 @@ function buildRoomInviteUrl(host: string, token: string, room: RoomConfig): stri
 
 export class VaultSyncSettingTab extends PluginSettingTab {
 	plugin: VaultCrdtSyncPlugin;
+	private refreshTimer: number | null = null;
+	private lastStatusKey = "";
 
 	constructor(app: App, plugin: VaultCrdtSyncPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
+	hide(): void {
+		if (this.refreshTimer !== null) {
+			window.clearInterval(this.refreshTimer);
+			this.refreshTimer = null;
+		}
+	}
+
+	private computeStatusKey(): string {
+		const status = this.plugin.getSettingsStatusSummary();
+		const setupIncomplete = !this.plugin.settings.host || !this.plugin.settings.token;
+		const others = this.plugin.getConnectedDevices().filter((d) => !d.isLocal).length;
+		return `${setupIncomplete}|${status.state}|${status.label}|${others}`;
+	}
+
+	/** Re-render when the connection state changes while the tab is open —
+	 * but never while the user is typing in one of the tab's inputs. */
+	private maybeRefresh(): void {
+		if (!this.containerEl.isConnected) return;
+		const key = this.computeStatusKey();
+		if (key === this.lastStatusKey) return;
+		const active = this.containerEl.ownerDocument.activeElement;
+		if (
+			active
+			&& this.containerEl.contains(active)
+			&& (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)
+		) {
+			return;
+		}
+		this.display();
+	}
+
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.addClass("lodestone-settings-tab");
+		this.lastStatusKey = this.computeStatusKey();
+		if (this.refreshTimer === null) {
+			this.refreshTimer = window.setInterval(() => this.maybeRefresh(), 2000);
+			this.plugin.registerInterval(this.refreshTimer);
+		}
 		const authMode = this.plugin.serverAuthMode;
 		const attachmentsAvailable = this.plugin.serverSupportsAttachments;
 		const setupIncomplete = !this.plugin.settings.host || !this.plugin.settings.token;

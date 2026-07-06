@@ -190,6 +190,17 @@ async function hashToken(token: string): Promise<string> {
 	return sha256Hex(bytes);
 }
 
+/** Chunked base64 encode — spreading a large Uint8Array into String.fromCharCode
+ * blows the V8 argument limit (~100 KB), so encode in slices. */
+function bytesToBase64(bytes: Uint8Array): string {
+	let binary = "";
+	const CHUNK = 8192;
+	for (let i = 0; i < bytes.length; i += CHUNK) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+	}
+	return btoa(binary);
+}
+
 function supportsBuckets(env: Env): boolean {
 	return env.LODESTONE_BUCKET !== undefined;
 }
@@ -602,23 +613,35 @@ async function handleHubSpokeRegister(
 
 	// Fetch hub's current Y-Doc state and seed the spoke's DO immediately,
 	// so the spoke client receives content as soon as it connects via WebSocket.
-	let initialStateUpdateBase64: string | null = null;
+	// The DO push is the load-bearing step — do it first, in its own try, so a
+	// failure encoding the inline payload can never prevent the seed.
+	let hubDocBytes: Uint8Array | null = null;
 	try {
-		const hubDocBytes = await fetchVaultDocument(env, hubVaultId);
-		if (hubDocBytes.byteLength > 0) {
-			initialStateUpdateBase64 = btoa(
-				String.fromCharCode(...hubDocBytes),
-			);
-			// Push hub state to spoke's DO so it's ready before the client connects.
+		const fetched = await fetchVaultDocument(env, hubVaultId);
+		if (fetched.byteLength > 0) {
+			hubDocBytes = fetched;
 			const spokeStub = await getServerByName(env.LODESTONE_SYNC, spokeVaultId);
-			await spokeStub.fetch("https://internal/__lodestone/apply-hub-update", {
+			const seedRes = await spokeStub.fetch("https://internal/__lodestone/apply-hub-update", {
 				method: "POST",
 				headers: { "Content-Type": "application/octet-stream" },
-				body: hubDocBytes,
+				body: fetched,
 			});
+			if (!seedRes.ok) {
+				console.warn(`${LOG_PREFIX} spoke seed push rejected (${seedRes.status}) for ${spokeVaultId}`);
+			}
 		}
 	} catch (err) {
 		console.warn(`${LOG_PREFIX} hub doc fetch/seed for spoke failed:`, err);
+	}
+
+	let initialStateUpdateBase64: string | null = null;
+	if (hubDocBytes) {
+		try {
+			initialStateUpdateBase64 = bytesToBase64(hubDocBytes);
+		} catch (err) {
+			// Inline payload is an optimization; the DO is already seeded.
+			console.warn(`${LOG_PREFIX} initialStateUpdate encode failed:`, err);
+		}
 	}
 
 	return json({ ok: true, initialStateUpdate: initialStateUpdateBase64 });

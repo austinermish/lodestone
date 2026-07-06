@@ -3638,11 +3638,32 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			if (!p.host || !p.token) {
 				throw new Error("Invite link is missing host/token, and this vault has no server connection.");
 			}
+			const accepted = await new Promise<boolean>((resolve) => {
+				new ConfirmModal(
+					this.app,
+					"Use the inviter's server for this vault?",
+					`This vault has no sync server of its own, so joining "${p.name}" will also make ${p.host} ` +
+						"this vault's sync server. Your entire vault (not just the shared folder) will sync to it, " +
+						"and its owner controls that infrastructure. You can deploy your own server later from settings.",
+					() => resolve(true),
+					"Join and use this server",
+					"Cancel",
+					() => resolve(false),
+				).open();
+			});
+			if (!accepted) {
+				new Notice("Room join cancelled.", 5000);
+				return;
+			}
 			this.settings.host = p.host;
 			this.settings.token = p.token;
 			restartNeeded = true;
 		} else if (p.host && this.settings.host !== p.host) {
-			new Notice("This invite is for a different host server. Existing connection kept.", 8000);
+			new Notice(
+				"This invite is for a different server than this vault's connection. Rooms across different servers aren't supported yet, so the join was not completed.",
+				10000,
+			);
+			return;
 		}
 
 		// Spoke joins with no includePaths — the room Y.Doc is already scoped by the hub.

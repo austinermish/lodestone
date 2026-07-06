@@ -296,6 +296,25 @@ Treat 4.1–4.2 as security work.
 - **Fix:** cache one probe doc per burst, or inspect the update's target parents via
   `Y.decodeUpdate` instead of full replay. Matters at the 50 MB vault target.
 
+### 4.6a Per-room server credentials / multi-server topology *(added 2026-07-06 from live testing)*
+- **Today**: rooms are pinned to the vault's single connection (`settings.host`/`token`).
+  A vault with no connection that joins a room **adopts the inviter's server as its
+  own vault sync server** (whole vault syncs there, not just the shared folder) —
+  now gated behind an explicit ConfirmModal in `handleRoomJoinParams`. A vault whose
+  connection differs from the invite's host cannot join at all (join now aborts with
+  an honest notice; previously it silently "joined" a nonexistent room on the wrong
+  server).
+- **Wanted** (Austin's chain scenario: V1 hub → V2 spoke, V2 also hub for V3, each
+  potentially on its own worker): store `host`/`token` per room in `RoomConfig`,
+  route each room's VaultSync/DiskMirror/blob traffic to its room's server, and keep
+  the Connection section strictly for the vault's own device sync. Depends on
+  room-scoped tokens (4.2) to avoid handing every spoke the master token of every
+  server in the chain.
+- **Status note**: seeding bug 2.1 was FIXED in 3.0.3 (chunked base64 + seed push
+  moved ahead of the encode) — spokes now receive existing hub files at
+  registration, not just new deltas. Existing broken rooms heal by leaving and
+  rejoining after the server update.
+
 ### 4.6 Room sync regression tests
 - No tests reference the 2.5.8/2.5.9 room fixes. Add a `tests/room-sync-*` suite
   covering: seeding (incl. >200 KB docs, per 2.1), echo suppression, structural
