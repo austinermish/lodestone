@@ -4304,13 +4304,18 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	}
 
 	private async handleSetupLink(params: Record<string, string>): Promise<void> {
-		if (params.action === "room") {
-			const roomId = typeof params.roomId === "string" ? params.roomId.trim() : "";
+		// Obsidian overwrites params.action with the registered protocol action name
+		// ("lodestone"), clobbering the invite URL's action=room query param — so a
+		// clicked invite link must be detected by the presence of roomId instead.
+		const roomId = typeof params.roomId === "string" ? params.roomId.trim() : "";
+		if (params.action === "room" || roomId) {
 			const host = typeof params.host === "string" ? params.host.trim() : "";
 			const token = typeof params.token === "string" ? params.token.trim() : "";
 			const name = typeof params.name === "string" ? params.name.trim() : "Shared room";
+			const rawPaths = typeof params.paths === "string" ? params.paths.trim() : "";
+			const hubIncludePaths = rawPaths ? rawPaths.split(",").map((p) => p.trim()).filter(Boolean) : [];
 			try {
-				await this.handleRoomJoinParams({ roomId, host, token, name });
+				await this.handleRoomJoinParams({ roomId, host, token, name, hubIncludePaths });
 			} catch (err) {
 				new Notice(`Failed to join room: ${err instanceof Error ? err.message : String(err)}`, 8000);
 			}

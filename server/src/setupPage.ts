@@ -522,6 +522,13 @@ export function renderSetupPage(options: SetupPageOptions): string {
 	        tokenInput.value = token;
 	        vaultInput.value = vaultId;
 
+	        // Persist the setup bundle in this browser so an accidentally closed
+	        // tab can resume from the running page. The server only stores a hash
+	        // of the token, so this browser is the only place it can be recovered.
+	        try {
+	          localStorage.setItem("lodestone-setup", JSON.stringify({ host: window.location.origin, token: token, vaultId: vaultId, at: Date.now() }));
+	        } catch (e) { /* storage unavailable — resume simply won't be offered */ }
+
 	        // Deep link for local button
 	        const deepLink = "obsidian://lodestone?" + new URLSearchParams({ action: "setup", host: window.location.origin, token: token, vaultId: vaultId }).toString();
 	        openBtn.href = deepLink;
@@ -746,6 +753,19 @@ export function renderRunningPage(options: RunningPageOptions): string {
     .badge { padding: 6px 12px; background: rgba(255,255,255,0.05); border-radius: 999px; font-size: 12px; border: 1px solid rgba(255,255,255,0.1);}
     .badge.active { color: #88ffb8; border-color: rgba(136, 255, 184, 0.3); }
     .badge.inactive { color: #6984a3; }
+    .resume { display: none; margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.1); text-align: center; }
+    .resume.show { display: block; }
+    .resume h2 { margin: 0 0 8px; font-size: 17px; }
+    .resume p { margin: 0 0 16px; font-size: 14px; }
+    .resume-qr { display: inline-block; padding: 12px; background: #fff; border-radius: 12px; margin: 0 0 16px; }
+    .resume-qr:empty { display: none; }
+    .resume-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      display: inline-block; padding: 10px 18px; border-radius: 10px; font-size: 14px;
+      text-decoration: none; cursor: pointer; border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.06); color: #f4f7fb; font-family: inherit;
+    }
+    .btn.primary { background: #88ffb8; border-color: #88ffb8; color: #08111d; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -757,7 +777,57 @@ export function renderRunningPage(options: RunningPageOptions): string {
       <div class="badge ${options.attachments ? "active" : "inactive"}">Attachments: ${options.attachments ? "ON" : "OFF"}</div>
       <div class="badge ${options.snapshots ? "active" : "inactive"}">Snapshots: ${options.snapshots ? "ON" : "OFF"}</div>
     </div>
+    <div class="resume" id="resume-section">
+      <h2>Finish connecting a device</h2>
+      <p>This browser still has your setup details from when you claimed the server. Scan the code on your phone, or connect this computer's Obsidian directly.</p>
+      <div class="resume-qr" id="resume-qr"></div>
+      <div class="resume-actions">
+        <a class="btn primary" id="resume-open" href="#">Connect Obsidian on this device</a>
+        <button class="btn" id="resume-copy">Copy setup link</button>
+        <button class="btn" id="resume-dismiss">Done — forget setup details</button>
+      </div>
+    </div>
   </main>
+  <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
+  <script>
+    (function () {
+      var raw = null;
+      try { raw = localStorage.getItem("lodestone-setup"); } catch (e) { return; }
+      if (!raw) return;
+      var bundle;
+      try { bundle = JSON.parse(raw); } catch (e) { return; }
+      if (!bundle || !bundle.token || !bundle.vaultId) return;
+      var host = bundle.host || window.location.origin;
+
+      var section = document.getElementById("resume-section");
+      var qrEl = document.getElementById("resume-qr");
+      var openBtn = document.getElementById("resume-open");
+      var copyBtn = document.getElementById("resume-copy");
+      var dismissBtn = document.getElementById("resume-dismiss");
+
+      var deepLink = "obsidian://lodestone?" + new URLSearchParams({ action: "setup", host: host, token: bundle.token, vaultId: bundle.vaultId }).toString();
+      var mobileUrl = host + "/mobile-setup#" + new URLSearchParams({ host: host, token: bundle.token, vaultId: bundle.vaultId }).toString();
+
+      openBtn.href = deepLink;
+      copyBtn.addEventListener("click", function () {
+        navigator.clipboard.writeText(mobileUrl).then(function () {
+          copyBtn.textContent = "Copied!";
+          setTimeout(function () { copyBtn.textContent = "Copy setup link"; }, 2000);
+        });
+      });
+      dismissBtn.addEventListener("click", function () {
+        try { localStorage.removeItem("lodestone-setup"); } catch (e) { /* ignore */ }
+        section.classList.remove("show");
+      });
+
+      if (window.QRious) {
+        var canvas = document.createElement("canvas");
+        qrEl.appendChild(canvas);
+        new window.QRious({ element: canvas, value: mobileUrl, size: 200, level: "M", foreground: "#08111d", background: "#ffffff" });
+      }
+      section.classList.add("show");
+    })();
+  </script>
 </body>
 </html>`;
 }
