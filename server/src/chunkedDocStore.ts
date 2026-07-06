@@ -1,9 +1,9 @@
 import * as Y from "yjs";
 import { sha256Hex } from "./hex";
 
-const CHECKPOINT_FORMAT = "yaos-doc-checkpoint-v2";
-const JOURNAL_META_FORMAT = "yaos-doc-journal-v1";
-const JOURNAL_ENTRY_FORMAT = "yaos-doc-journal-entry-v1";
+const CHECKPOINT_FORMAT = "lodestone-doc-checkpoint-v2";
+const JOURNAL_META_FORMAT = "lodestone-doc-journal-v1";
+const JOURNAL_ENTRY_FORMAT = "lodestone-doc-journal-entry-v1";
 
 const CHECKPOINT_POINTER_KEY = "document:checkpoint:current";
 const CHECKPOINT_MANIFEST_PREFIX = "document:checkpoint:manifest:";

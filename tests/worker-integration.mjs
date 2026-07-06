@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const HOST = "http://127.0.0.1:8787";
-const VAULT_ID = `yaos-integration-${Date.now().toString(36)}`;
+const VAULT_ID = `lodestone-integration-${Date.now().toString(36)}`;
 const WRANGLER_BIN = resolve("server/node_modules/.bin/wrangler");
 
 function wait(ms) {
@@ -36,9 +36,9 @@ function runCommand(cmd, args, token, extraEnv = {}) {
 			stdio: "inherit",
 			env: {
 				...process.env,
-				YAOS_TEST_HOST: HOST,
+				LODESTONE_TEST_HOST: HOST,
 				SYNC_TOKEN: token,
-				YAOS_TEST_VAULT_ID: VAULT_ID,
+				LODESTONE_TEST_VAULT_ID: VAULT_ID,
 				...extraEnv,
 			},
 		});
@@ -74,7 +74,7 @@ async function claimServer() {
 	}
 
 	const payload = await res.json();
-	if (typeof payload?.obsidianUrl !== "string" || !payload.obsidianUrl.startsWith("obsidian://yaos?")) {
+	if (typeof payload?.obsidianUrl !== "string" || !payload.obsidianUrl.startsWith("obsidian://lodestone?")) {
 		throw new Error("claim response missing Obsidian setup URL");
 	}
 
@@ -99,7 +99,7 @@ async function resolveAuthToken(defaultEnvToken) {
 }
 
 async function main() {
-	const persistDir = mkdtempSync(join(tmpdir(), "yaos-wrangler-"));
+	const persistDir = mkdtempSync(join(tmpdir(), "lodestone-wrangler-"));
 	const envToken = randomBytes(32).toString("hex");
 	const wrangler = spawn(
 		WRANGLER_BIN,

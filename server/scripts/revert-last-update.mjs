@@ -11,14 +11,14 @@ const lastUpdateCommit = read("git", [
 	"log",
 	"--fixed-strings",
 	"--grep",
-	"yaos(server): update to ",
+	"lodestone(server): update to ",
 	"-n",
 	"1",
 	"--format=%H",
 ]);
 
 if (!lastUpdateCommit) {
-	throw new Error("No previous YAOS server update commit was found");
+	throw new Error("No previous Lodestone server update commit was found");
 }
 
 console.log(`Reverting ${lastUpdateCommit}`);

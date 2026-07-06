@@ -41,14 +41,14 @@ const MAX_DEBUG_TRACE_EVENTS = 200;
 const JOURNAL_COMPACT_MAX_ENTRIES = 50;
 const JOURNAL_COMPACT_MAX_BYTES = 1 * 1024 * 1024;
 const TRACE_DEBUG_LIMIT = 100;
-const LOG_PREFIX = "[yaos-sync:server]";
+const LOG_PREFIX = "[lodestone-sync:server]";
 
 interface ServerTraceEntry extends StoredTraceEntry {}
 
 interface ServerEnv {
-	YAOS_BUCKET?: R2Bucket;
-	YAOS_SYNC: DurableObjectNamespace<VaultSyncServer>;
-	YAOS_HUB?: DurableObjectNamespace;
+	LODESTONE_BUCKET?: R2Bucket;
+	LODESTONE_SYNC: DurableObjectNamespace<VaultSyncServer>;
+	LODESTONE_HUB?: DurableObjectNamespace;
 }
 
 type SyncMode = "hub" | "spoke" | "standalone" | "hub+spoke";
@@ -175,14 +175,14 @@ export class VaultSyncServer extends YServer {
 	async onRequest(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 
-		if (request.method === "GET" && url.pathname === "/__yaos/meta") {
+		if (request.method === "GET" && url.pathname === "/__lodestone/meta") {
 			return json({
 				roomId: this.getRoomId(),
 				meta: await this.readRoomMetaCheap(),
 			});
 		}
 
-		if (request.method === "GET" && url.pathname === "/__yaos/document") {
+		if (request.method === "GET" && url.pathname === "/__lodestone/document") {
 			return new Response(Y.encodeStateAsUpdate(this.document), {
 				headers: {
 					"Content-Type": "application/octet-stream",
@@ -191,7 +191,7 @@ export class VaultSyncServer extends YServer {
 			});
 		}
 
-		if (request.method === "GET" && url.pathname === "/__yaos/debug") {
+		if (request.method === "GET" && url.pathname === "/__lodestone/debug") {
 			const recent = await listRecentTraceEntries(this.ctx.storage, TRACE_DEBUG_LIMIT);
 			return json({
 				roomId: this.getRoomId(),
@@ -199,7 +199,7 @@ export class VaultSyncServer extends YServer {
 			});
 		}
 
-		if (request.method === "POST" && url.pathname === "/__yaos/trace") {
+		if (request.method === "POST" && url.pathname === "/__lodestone/trace") {
 			let body: { event?: string; data?: Record<string, unknown> } = {};
 			try {
 				body = await request.json();
@@ -215,7 +215,7 @@ export class VaultSyncServer extends YServer {
 			return json({ ok: true });
 		}
 
-		if (request.method === "POST" && url.pathname === "/__yaos/set-mode") {
+		if (request.method === "POST" && url.pathname === "/__lodestone/set-mode") {
 			let body: { mode?: string; hubVaultId?: string } = {};
 			try {
 				body = await request.json();
@@ -242,8 +242,8 @@ export class VaultSyncServer extends YServer {
 		}
 
 		// Spoke → Hub: apply incoming spoke delta filtered to hub-known paths.
-		if (request.method === "POST" && url.pathname === "/__yaos/apply-spoke-update") {
-			const originVaultId = request.headers.get("X-Yaos-Origin") ?? "unknown";
+		if (request.method === "POST" && url.pathname === "/__lodestone/apply-spoke-update") {
+			const originVaultId = request.headers.get("X-Lodestone-Origin") ?? "unknown";
 			const updateBytes = new Uint8Array(await request.arrayBuffer());
 			if (updateBytes.byteLength === 0) {
 				return json({ ok: true, applied: false, reason: "empty" });
@@ -315,7 +315,7 @@ export class VaultSyncServer extends YServer {
 		}
 
 		// Hub → Spoke: apply incoming hub delta to this spoke's Y.Doc.
-		if (request.method === "POST" && url.pathname === "/__yaos/apply-hub-update") {
+		if (request.method === "POST" && url.pathname === "/__lodestone/apply-hub-update") {
 			const updateBytes = new Uint8Array(await request.arrayBuffer());
 			if (updateBytes.byteLength === 0) {
 				return json({ ok: true, applied: false, reason: "empty" });
@@ -340,7 +340,7 @@ export class VaultSyncServer extends YServer {
 			return json({ ok: true, applied: true });
 		}
 
-		if (request.method === "POST" && url.pathname === "/__yaos/snapshot-maybe") {
+		if (request.method === "POST" && url.pathname === "/__lodestone/snapshot-maybe") {
 			let body: { device?: string } = {};
 			try {
 				body = await request.json();
@@ -483,7 +483,7 @@ export class VaultSyncServer extends YServer {
 		const run = runSerialized(
 			serialized,
 			async () => {
-				const bucket = (this.env as ServerEnv).YAOS_BUCKET;
+				const bucket = (this.env as ServerEnv).LODESTONE_BUCKET;
 				if (!bucket) {
 					return {
 						status: "unavailable",
@@ -528,7 +528,7 @@ export class VaultSyncServer extends YServer {
 		}) as ServerTraceEntry;
 
 		console.debug(JSON.stringify({
-			source: "yaos-sync/server",
+			source: "lodestone-sync/server",
 			...entry,
 		}));
 

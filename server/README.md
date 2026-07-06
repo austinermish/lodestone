@@ -1,8 +1,8 @@
-# YAOS server
+# Lodestone server
 
-Cloudflare Worker server for the YAOS Obsidian plugin. It relays Yjs CRDT updates through a Durable Object and stores attachments plus snapshots in R2.
+Cloudflare Worker server for the Lodestone Obsidian plugin. It relays Yjs CRDT updates through a Durable Object and stores attachments plus snapshots in R2.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/austinermish/yaos/tree/main/server)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/austinermish/lodestone/tree/main/server)
 
 ## Architecture
 
@@ -42,15 +42,15 @@ The default deploy is text-only:
 - no R2 binding is required up front
 - the first browser visit shows the claim page
 
-That claim page generates a token in the browser and returns an `obsidian://yaos?...` setup link you can use to configure the plugin.
+That claim page generates a token in the browser and returns an `obsidian://lodestone?...` setup link you can use to configure the plugin.
 
 ### How updates work after deploy
 
 The Deploy to Cloudflare button creates a new repository in your own Git account and connects this Worker to that new repo.
 
-That means future pushes to your generated repo will redeploy automatically, but future pushes to the original `austinermish/yaos` template repo will not update your existing Worker on their own.
+That means future pushes to your generated repo will redeploy automatically, but future pushes to the original `austinermish/lodestone` template repo will not update your existing Worker on their own.
 
-To pick up new YAOS changes later:
+To pick up new Lodestone changes later:
 
 1. Add your generated repo URL in the plugin settings (`Deployment repo URL`).
 2. Use **Initialize updater** once (GitHub) if workflows are missing.
@@ -71,7 +71,7 @@ If you want attachments and snapshots later:
 
 1. Create an R2 bucket in the Cloudflare dashboard.
 2. Open your Worker in **Workers & Pages**.
-3. Add an R2 binding named `YAOS_BUCKET`.
+3. Add an R2 binding named `LODESTONE_BUCKET`.
 
 The same Worker will then begin reporting attachments and snapshots as available.
 
@@ -82,13 +82,13 @@ If the Cloudflare dashboard UI is transiently failing when attaching the bucket,
 
 ```toml
 [[r2_buckets]]
-binding = "YAOS_BUCKET"
+binding = "LODESTONE_BUCKET"
 bucket_name = "your-bucket-name"
 ```
 
 3. Commit and push. Cloudflare redeploys from that commit.
 
-After deploy, refresh your Worker URL. YAOS should report attachments/snapshots as available.
+After deploy, refresh your Worker URL. Lodestone should report attachments/snapshots as available.
 
 ## Transient Cloudflare deployment issues
 

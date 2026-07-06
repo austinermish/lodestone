@@ -674,13 +674,13 @@ export class EditorBindingManager {
 		if (this.cmDegradedWarned) return;
 		this.cmDegradedWarned = true;
 		new Notice(
-			"YAOS: Could not resolve the active editor instance. " +
+			"Lodestone: Could not resolve the active editor instance. " +
 			"Live collaborative editing is unavailable. Background sync may still continue, " +
 			"but live cursors and editor binding are degraded. Please check for a plugin update.",
 			10000,
 		);
 		console.error(
-			"[yaos] Critical: Could not locate CodeMirror 6 EditorView. Live binding disabled.",
+			"[lodestone] Critical: Could not locate CodeMirror 6 EditorView. Live binding disabled.",
 		);
 	}
 
@@ -1042,7 +1042,7 @@ export class EditorBindingManager {
 	private log(msg: string): void {
 		this.trace?.("editor", msg);
 		if (this.debug) {
-			console.debug(`[yaos:editor] ${msg}`);
+			console.debug(`[lodestone:editor] ${msg}`);
 		}
 	}
 

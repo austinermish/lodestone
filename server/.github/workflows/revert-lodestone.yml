@@ -1,4 +1,4 @@
-name: Revert YAOS Server
+name: Revert Lodestone Server
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-      - name: Revert the last YAOS update commit
+      - name: Revert the last Lodestone update commit
         run: node scripts/revert-last-update.mjs
 
       - name: Push revert commit

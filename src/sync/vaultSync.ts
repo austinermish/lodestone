@@ -188,7 +188,7 @@ export class VaultSync {
 		});
 
 		const roomId = settings.vaultId;
-		const idbName = `yaos:${settings.vaultId}`;
+		const idbName = `lodestone:${settings.vaultId}`;
 
 		this.log(`Connecting to ${settings.host} room=${roomId}`);
 		this.log(`IndexedDB database: ${idbName}`);
@@ -202,7 +202,7 @@ export class VaultSync {
 		(this.persistence as unknown as { _db: Promise<IDBDatabase> })._db
 			.catch((err: unknown) => {
 				this.captureIndexedDbError(err, "open");
-				console.error("[yaos] IndexedDB failed to open:", err);
+				console.error("[lodestone] IndexedDB failed to open:", err);
 			});
 
 		(this.persistence as unknown as { _db: Promise<IDBDatabase> })._db
@@ -1384,7 +1384,7 @@ export class VaultSync {
 	/** The IndexedDB database name for this vault. */
 	get idbName(): string {
 		const vaultId = this.sys.get("vaultId");
-		return `yaos:${typeof vaultId === "string" ? vaultId : "unknown"}`;
+		return `lodestone:${typeof vaultId === "string" ? vaultId : "unknown"}`;
 	}
 
 	/**
@@ -1431,13 +1431,13 @@ export class VaultSync {
 	 * Safe to call after destroy() — uses the raw IDB deleteDatabase API.
 	 */
 	static deleteIdb(vaultId: string): Promise<void> {
-		const name = `yaos:${vaultId}`;
+		const name = `lodestone:${vaultId}`;
 		return new Promise((resolve, reject) => {
 			const req = indexedDB.deleteDatabase(name);
 			req.onsuccess = () => resolve();
 			req.onerror = () => reject(req.error ?? new Error(`Failed to delete IndexedDB database "${name}"`));
 			req.onblocked = () => {
-				console.warn(`[yaos] IDB delete blocked for "${name}"`);
+				console.warn(`[lodestone] IDB delete blocked for "${name}"`);
 				// Resolve anyway — it'll be deleted when connections close
 				resolve();
 			};
@@ -1604,7 +1604,7 @@ export class VaultSync {
 		}
 		this.trace?.("sync", msg);
 		if (this.debug) {
-			console.debug(`[yaos] ${msg}`);
+			console.debug(`[lodestone] ${msg}`);
 		}
 	}
 }

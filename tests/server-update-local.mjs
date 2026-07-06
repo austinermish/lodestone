@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const rootDir = resolve(".");
-const artifactPath = resolve(rootDir, "dist/release-assets/yaos-server.zip");
-const tempDir = mkdtempSync(join(tmpdir(), "yaos-server-update-test-"));
+const artifactPath = resolve(rootDir, "dist/release-assets/lodestone-server.zip");
+const tempDir = mkdtempSync(join(tmpdir(), "lodestone-server-update-test-"));
 const repoDir = join(tempDir, "repo");
 
 function run(command, args, options = {}) {
@@ -24,8 +24,8 @@ try {
 	cpSync(resolve(rootDir, "server"), repoDir, { recursive: true });
 
 	run("git", ["init", "-q"]);
-	run("git", ["config", "user.name", "YAOS Local Test"]);
-	run("git", ["config", "user.email", "local-test@yaos"]);
+	run("git", ["config", "user.name", "Lodestone Local Test"]);
+	run("git", ["config", "user.email", "local-test@lodestone"]);
 	run("git", ["add", "-A"]);
 	run("git", ["commit", "-qm", "baseline"]);
 
@@ -51,7 +51,7 @@ try {
 	run("node", ["scripts/update-from-release.mjs"], {
 		env: {
 			...process.env,
-			YAOS_RELEASE_FILE: artifactPath,
+			LODESTONE_RELEASE_FILE: artifactPath,
 		},
 	});
 
@@ -66,7 +66,7 @@ try {
 	}
 
 	run("git", ["add", "-A"]);
-	run("git", ["commit", "-qm", `yaos(server): update to ${currentServerVersion}`]);
+	run("git", ["commit", "-qm", `lodestone(server): update to ${currentServerVersion}`]);
 	run("node", ["scripts/revert-last-update.mjs"]);
 
 	const revertedVersion = read("src/version.ts");
@@ -79,7 +79,7 @@ try {
 		throw new Error("Revert test failed: protected wrangler.toml changes were lost");
 	}
 
-	console.log("Local YAOS server update/revert smoke test passed.");
+	console.log("Local Lodestone server update/revert smoke test passed.");
 } finally {
 	rmSync(tempDir, { recursive: true, force: true });
 }

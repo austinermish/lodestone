@@ -25,7 +25,7 @@ function json(body: unknown, status = 200): Response {
 
 /**
  * Stores spoke registrations for a hub vault.
- * One instance per hub vault, keyed by hubVaultId via `env.YAOS_HUB.idFromName(hubVaultId)`.
+ * One instance per hub vault, keyed by hubVaultId via `env.LODESTONE_HUB.idFromName(hubVaultId)`.
  */
 export class HubRegistry {
 	constructor(private readonly state: DurableObjectState) {}
@@ -33,18 +33,18 @@ export class HubRegistry {
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 
-		if (request.method === "GET" && url.pathname === "/__yaos/hub/spokes") {
+		if (request.method === "GET" && url.pathname === "/__lodestone/hub/spokes") {
 			const spokes = (await this.state.storage.get<SpokeEntry[]>(SPOKES_KEY)) ?? [];
 			return json({ spokes });
 		}
 
-		if (request.method === "GET" && url.pathname === "/__yaos/hub/meta") {
+		if (request.method === "GET" && url.pathname === "/__lodestone/hub/meta") {
 			const meta = await this.state.storage.get<HubMeta>(HUB_META_KEY);
 			const spokes = (await this.state.storage.get<SpokeEntry[]>(SPOKES_KEY)) ?? [];
 			return json({ meta, spokeCount: spokes.length });
 		}
 
-		if (request.method === "POST" && url.pathname === "/__yaos/hub/spokes") {
+		if (request.method === "POST" && url.pathname === "/__lodestone/hub/spokes") {
 			let body: { spokeVaultId?: string; deviceName?: string; hubVaultId?: string } = {};
 			try {
 				body = await request.json();
@@ -93,10 +93,10 @@ export class HubRegistry {
 
 		if (
 			request.method === "DELETE" &&
-			url.pathname.startsWith("/__yaos/hub/spokes/")
+			url.pathname.startsWith("/__lodestone/hub/spokes/")
 		) {
 			const spokeVaultId = decodeURIComponent(
-				url.pathname.slice("/__yaos/hub/spokes/".length),
+				url.pathname.slice("/__lodestone/hub/spokes/".length),
 			);
 			if (!spokeVaultId) {
 				return json({ error: "missing spokeVaultId" }, 400);
@@ -112,7 +112,7 @@ export class HubRegistry {
 			return json({ ok: true });
 		}
 
-		if (request.method === "POST" && url.pathname === "/__yaos/hub/spokes/touch") {
+		if (request.method === "POST" && url.pathname === "/__lodestone/hub/spokes/touch") {
 			let body: { spokeVaultId?: string } = {};
 			try {
 				body = await request.json();

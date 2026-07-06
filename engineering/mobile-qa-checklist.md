@@ -1,4 +1,4 @@
-# YAOS QA Runbook (Split Execution)
+# Lodestone QA Runbook (Split Execution)
 
 This runbook is split into two runs:
 
@@ -43,9 +43,9 @@ Final diagnostics outcome for latest desktop run:
 Evidence artifacts (latest focused pass):
 
 - diagnostics:
-  - `/home/kavin/holyqa-pc/.obsidian/plugins/yaos/diagnostics/sync-diagnostics-2026-03-09T19-01-40-455Z-device-holyqa-pc.json`
+  - `/home/kavin/holyqa-pc/.obsidian/plugins/lodestone/diagnostics/sync-diagnostics-2026-03-09T19-01-40-455Z-device-holyqa-pc.json`
 - boot trace:
-  - `/home/kavin/holyqa-pc/.obsidian/plugins/yaos/logs/2026-03-09/boot-48yzzkohuuZXRA.ndjson`
+  - `/home/kavin/holyqa-pc/.obsidian/plugins/lodestone/logs/2026-03-09/boot-48yzzkohuuZXRA.ndjson`
 
 ## Holy pass vault setup (Run B preflight)
 
@@ -81,7 +81,7 @@ When to redeploy:
   want latest server trace markers in `/debug/recent`.
 
 3. Diagnostics command usage:
-- Use `YAOS: Export sync diagnostics` at each marked checkpoint.
+- Use `Lodestone: Export sync diagnostics` at each marked checkpoint.
 - Name or note each export by phase in your test notes.
 
 ## Run A (completed): Migration drill + divergence guard
@@ -90,7 +90,7 @@ When to redeploy:
 
 1. Install the same plugin build on both devices.
    - Exception for divergence test: mobile may remain on older plugin.
-2. Enable YAOS debug mode on both devices.
+2. Enable Lodestone debug mode on both devices.
 3. Confirm both devices point to the same `host` and intended `vaultId`.
 4. Confirm current schema before migration:
    - Export diagnostics and verify:
@@ -100,7 +100,7 @@ When to redeploy:
       - If `state.schema.storedInDoc` is `2`: migration already happened; run
         divergence guard only (Phase 3) using an intentionally old client.
 5. Clear old mental context by exporting a baseline diagnostics file on both:
-   - `YAOS: Export sync diagnostics`
+   - `Lodestone: Export sync diagnostics`
 6. Start a test notes log with timestamps for each phase transition.
 
 Pass criteria:
@@ -123,7 +123,7 @@ Goal:
 
 ### 9. Run migration command
 
-1. On primary device run: `YAOS: Migrate schema to v2`.
+1. On primary device run: `Lodestone: Migrate schema to v2`.
 2. Wait for sync stabilization.
 3. Restart both clients once.
 4. Export diagnostics on both devices.
@@ -168,9 +168,9 @@ Migration drill complete. Archive all diagnostics + screenshots.
 Run A completion references:
 
 - Primary pass diagnostic:
-  - `/home/kavin/test2/.obsidian/plugins/yaos/diagnostics/sync-diagnostics-2026-03-08T14-51-53-386Z-device-mmhns1xg.json`
+  - `/home/kavin/test2/.obsidian/plugins/lodestone/diagnostics/sync-diagnostics-2026-03-08T14-51-53-386Z-device-mmhns1xg.json`
 - Old-client rejection diagnostic:
-  - `/home/kavin/test2-oldclient-v1sim/.obsidian/plugins/yaos/diagnostics/sync-diagnostics-2026-03-08T14-51-57-973Z-device-oldclient-v1sim.json`
+  - `/home/kavin/test2-oldclient-v1sim/.obsidian/plugins/lodestone/diagnostics/sync-diagnostics-2026-03-08T14-51-57-973Z-device-oldclient-v1sim.json`
 
 ---
 
@@ -186,7 +186,7 @@ Run B was executed after Run A and passed for v1.0.0 release scope.
 2. In Device A settings, use **Pair new device**.
 3. Pair Device B using in-plugin QR/deep-link (no manual `vaultId` typing).
 4. Validate claim button + camera QR + Lens + copy/paste fallback.
-5. Run `YAOS: Export sync diagnostics` on both devices.
+5. Run `Lodestone: Export sync diagnostics` on both devices.
 
 Pass criteria:
 - Device B receives host/token/vaultId correctly.

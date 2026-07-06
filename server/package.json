@@ -1,5 +1,5 @@
 {
-	"name": "yaos-server",
+	"name": "lodestone-server",
 	"version": "0.3.0",
 	"private": true,
 	"description": "Cloudflare Worker server for Obsidian vault CRDT sync via y-partyserver",

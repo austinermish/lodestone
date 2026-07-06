@@ -1,6 +1,6 @@
-const HOST = process.env.YAOS_TEST_HOST || "http://127.0.0.1:8787";
+const HOST = process.env.LODESTONE_TEST_HOST || "http://127.0.0.1:8787";
 const TOKEN = process.env.SYNC_TOKEN || "";
-const BASE_VAULT_ID = process.env.YAOS_TEST_VAULT_ID || `yaos-hardening-${Date.now().toString(36)}`;
+const BASE_VAULT_ID = process.env.LODESTONE_TEST_VAULT_ID || `lodestone-hardening-${Date.now().toString(36)}`;
 
 if (!TOKEN) {
 	throw new Error("SYNC_TOKEN is required for hardening worker tests");

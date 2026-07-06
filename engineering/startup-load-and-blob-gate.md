@@ -34,7 +34,7 @@ Once we instrumented startup by phase, the timeline became unambiguous:
 - the dominant stall was in client networking cold path
 - sync runtime startup itself was not the primary blocker
 
-After removing that startup block, YAOS became fast enough to expose a second
+After removing that startup block, Lodestone became fast enough to expose a second
 issue: attachment download decisions were sometimes made before Obsidian's local
 vault model had fully settled. In that window, a file could exist on disk while
 the in-memory view still looked "missing," which led to wasted work and `EEXIST`
@@ -58,7 +58,7 @@ This preserves fast readiness under slow/hostile network conditions.
 
 This first fix changed startup character immediately. `onload()` moved from
 "blocked behind network metadata" to effectively instant completion, with
-measured runs around ~10ms. In practical terms, YAOS startup became faster than
+measured runs around ~10ms. In practical terms, Lodestone startup became faster than
 the host's visible startup noise, which is exactly where plugin load should
 live. It felt less like "booting a plugin" and more like "already there."
 
@@ -80,12 +80,12 @@ optimistic behavior that can misfire.
 
 Attachment observers can start early, but download execution is gated.
 
-During early boot, YAOS records intent (queue state) without immediately
+During early boot, Lodestone records intent (queue state) without immediately
 materializing every remote blob reference. Draining the download queue opens only
 after two readiness conditions:
 
 - host lifecycle ready (`layoutReady`)
-- YAOS lifecycle ready (startup/reconcile boundary reached)
+- Lodestone lifecycle ready (startup/reconcile boundary reached)
 
 This keeps the main benefit of fast boot (startup is not blocked) without lying
 to ourselves about local file presence too early.
@@ -101,9 +101,9 @@ So `EEXIST` handling stays as a narrow recovery path:
 - not the normal path
 - just fault tolerance for real concurrent filesystem behavior
 
-## Why this architecture fits YAOS
+## Why this architecture fits Lodestone
 
-YAOS is explicitly local-first. That means startup should degrade gracefully when
+Lodestone is explicitly local-first. That means startup should degrade gracefully when
 network state is bad, and should not regress into "UI held hostage by metadata."
 
 This design keeps the promise:

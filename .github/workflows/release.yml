@@ -40,11 +40,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          zip yaos.zip main.js manifest.json styles.css
+          zip lodestone.zip main.js manifest.json styles.css
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
-              yaos.zip \
-              dist/release-assets/yaos-server.zip \
+              lodestone.zip \
+              dist/release-assets/lodestone-server.zip \
               dist/release-assets/update-manifest.json \
               main.js \
               manifest.json \
@@ -54,8 +54,8 @@ jobs:
             gh release create "$GITHUB_REF_NAME" \
               --title "$GITHUB_REF_NAME" \
               --generate-notes \
-              yaos.zip \
-              dist/release-assets/yaos-server.zip \
+              lodestone.zip \
+              dist/release-assets/lodestone-server.zip \
               dist/release-assets/update-manifest.json \
               main.js \
               manifest.json \

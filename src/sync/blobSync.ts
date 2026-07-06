@@ -612,7 +612,7 @@ export class BlobSyncManager {
 					let p: Promise<void>;
 					p = this.processUpload(item)
 						.catch((err) => {
-							console.error(`[yaos:blob] Unexpected upload failure for "${item.path}":`, err);
+							console.error(`[lodestone:blob] Unexpected upload failure for "${item.path}":`, err);
 						})
 						.finally(() => {
 							inFlight.delete(p);
@@ -743,7 +743,7 @@ export class BlobSyncManager {
 				}
 				this.uploadQueue.delete(item.path);
 				console.error(
-					`[yaos:blob] Upload failed permanently for "${item.path}":`,
+					`[lodestone:blob] Upload failed permanently for "${item.path}":`,
 					err,
 				);
 			}
@@ -825,7 +825,7 @@ export class BlobSyncManager {
 					let p: Promise<void>;
 					p = this.processDownload(item)
 						.catch((err) => {
-							console.error(`[yaos:blob] Unexpected download failure for "${item.path}":`, err);
+							console.error(`[lodestone:blob] Unexpected download failure for "${item.path}":`, err);
 						})
 						.finally(() => {
 							inFlight.delete(p);
@@ -990,7 +990,7 @@ export class BlobSyncManager {
 				}
 				this.downloadQueue.delete(item.path);
 				console.error(
-					`[yaos:blob] Download failed permanently for "${item.path}":`,
+					`[lodestone:blob] Download failed permanently for "${item.path}":`,
 					err,
 				);
 			}
@@ -1027,7 +1027,7 @@ export class BlobSyncManager {
 				this.log(`handleRemoteDelete: deleted "${path}" from disk`);
 			} catch (err) {
 				console.error(
-					`[yaos:blob] handleRemoteDelete failed for "${path}":`,
+					`[lodestone:blob] handleRemoteDelete failed for "${path}":`,
 					err,
 				);
 			}
@@ -1310,7 +1310,7 @@ export class BlobSyncManager {
 	private log(msg: string): void {
 		this.trace?.("blob", msg);
 		if (this.debug) {
-			console.debug(`[yaos:blob] ${msg}`);
+			console.debug(`[lodestone:blob] ${msg}`);
 		}
 	}
 

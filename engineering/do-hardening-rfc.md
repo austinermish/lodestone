@@ -1,6 +1,6 @@
 # Durable Object Hardening RFC
 
-This RFC defines the next server hardening pass for YAOS.
+This RFC defines the next server hardening pass for Lodestone.
 
 It is intentionally narrow:
 
@@ -15,12 +15,12 @@ Approved for implementation.
 
 ## Why this RFC exists
 
-Recent production logs from a real YAOS deployment showed a concrete failure mode:
+Recent production logs from a real Lodestone deployment showed a concrete failure mode:
 
 - `SQLITE_TOOBIG`
 - across websocket traffic
-- across `/__yaos/trace`
-- across `/__yaos/document`
+- across `/__lodestone/trace`
+- across `/__lodestone/document`
 
 The initial theory was "the room document is too large". After auditing the code and architecture docs, that explanation no longer fits the implementation.
 
@@ -58,7 +58,7 @@ The following are accepted architectural choices and are not being reopened in t
 
 ### Debounced `onSave()` is intentional
 
-YAOS uses coalesced persistence at `onSave()` cadence by design. This preserves low IOPS and avoids turning active editing or collaboration into disk-thrash.
+Lodestone uses coalesced persistence at `onSave()` cadence by design. This preserves low IOPS and avoids turning active editing or collaboration into disk-thrash.
 
 Collaboration latency is governed by in-memory Yjs state and websocket fanout, not by SQLite flush timing.
 
@@ -67,7 +67,7 @@ Important distinction:
 - sync latency: how fast another connected client sees an edit
 - durability latency: how fast that in-memory state is flushed to SQLite
 
-In YAOS, active collaboration already happens through the in-memory room state inside the Durable Object. Lowering the save debounce when multiple clients are connected would not make collaboration faster. It would only shrink the crash-loss window while materially increasing:
+In Lodestone, active collaboration already happens through the in-memory room state inside the Durable Object. Lowering the save debounce when multiple clients are connected would not make collaboration faster. It would only shrink the crash-loss window while materially increasing:
 
 - SQLite write frequency
 - journal churn
@@ -78,7 +78,7 @@ For this reason, "more active clients" is not a signal to speed up persistence.
 
 ### The config DO is acceptable in BYOC
 
-Each YAOS deployment is single-user BYOC. The config DO is not a multi-tenant global control plane. It remains the authoritative store for claim/auth/update metadata.
+Each Lodestone deployment is single-user BYOC. The config DO is not a multi-tenant global control plane. It remains the authoritative store for claim/auth/update metadata.
 
 A tiny Worker RAM cache may still be added later as a micro-optimization, but it is not a required part of this implementation.
 
@@ -151,7 +151,7 @@ Approved change:
 
 This applies to:
 
-- explicit `/__yaos/trace` writes
+- explicit `/__lodestone/trace` writes
 - `checkpoint-load` tracing during room load
 - compaction tracing during checkpoint fallback
 
@@ -159,11 +159,11 @@ This applies to:
 
 Current state:
 
-- `VaultSyncServer.fetch()` calls `ensureDocumentLoaded()` before handling `/__yaos/trace` and `/__yaos/debug`
+- `VaultSyncServer.fetch()` calls `ensureDocumentLoaded()` before handling `/__lodestone/trace` and `/__lodestone/debug`
 
 Approved change:
 
-- route `/__yaos/trace` and `/__yaos/debug` before hydration
+- route `/__lodestone/trace` and `/__lodestone/debug` before hydration
 - debug reads should inspect trace storage only unless explicitly documented otherwise
 
 This keeps observability traffic cheap and prevents invalid requests from waking the full room state unnecessarily.
@@ -293,12 +293,12 @@ This RFC intentionally chooses the lower-risk `loadPromise` pattern rather than 
 
 Cloudflare's generic Durable Object guidance often points toward constructor-time initialization with `blockConcurrencyWhile()`.
 
-That is directionally correct for plain Durable Objects, but YAOS is not operating a bare constructor-shaped DO. It is layered on `y-partyserver`, which already owns meaningful parts of the room lifecycle.
+That is directionally correct for plain Durable Objects, but Lodestone is not operating a bare constructor-shaped DO. It is layered on `y-partyserver`, which already owns meaningful parts of the room lifecycle.
 
 So the choice here is pragmatic:
 
 - `loadPromise` directly solves the duplicate-load problem we observed in the current code shape
-- it is local to YAOS logic
+- it is local to Lodestone logic
 - it is less invasive than reworking the room constructor/lifecycle contract with the transport library
 
 If later testing shows that constructor-level gating integrates cleanly with `y-partyserver`, that can still be revisited. It is not the first move in this RFC.
@@ -349,7 +349,7 @@ Required tests:
 
 - trace writes do not crash the room if trace persistence fails
 - trace storage no longer uses one growing single value
-- `/__yaos/trace` and `/__yaos/debug` do not require document hydration
+- `/__lodestone/trace` and `/__lodestone/debug` do not require document hydration
 - websocket schema admission no longer fetches or decodes the full room document
 - concurrent cold-start requests share one room load
 - `/snapshots/maybe` is idempotent under concurrency
@@ -400,7 +400,7 @@ Workers KV is intentionally excluded from this RFC for auth/config reads.
 
 Reasons:
 
-- YAOS is BYOC, not a multi-tenant control plane
+- Lodestone is BYOC, not a multi-tenant control plane
 - the config DO is already low-QPS
 - KV would add deployment complexity and eventual-consistency semantics
 - this hardening pass is focused on correctness and availability wins justified by real production evidence
@@ -524,7 +524,7 @@ The fallback path should be rare and should not become the normal path once room
 ### Low-risk changes
 
 - trace fail-open behavior
-- routing `/__yaos/trace` and `/__yaos/debug` before room hydration
+- routing `/__lodestone/trace` and `/__lodestone/debug` before room hydration
 - `loadPromise` room-load gating
 - snapshot `/maybe` serialization
 
@@ -568,7 +568,7 @@ This RFC does not claim:
 - Durable Objects are unreliable
 - the current chunked persistence engine is wrong
 - collaboration requires faster disk flushes
-- the config DO is a true scale bottleneck in YAOS's BYOC model
+- the config DO is a true scale bottleneck in Lodestone's BYOC model
 
 The actual production incident here is narrower and more actionable:
 

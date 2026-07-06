@@ -185,6 +185,16 @@ Ship these as one or two patch releases before anything else.
 
 ## Phase 3 — Rename: YAOS → Lodestone
 
+> **STATUS: EXECUTED 2026-07-06** (ahead of schedule, on the `project-plan-lodestone`
+> branch, as v3.0.0). Austin confirmed no live installs existed, so the data.json
+> migration shim (3.1) and all legacy-compatibility windows (dual protocol actions,
+> dual route prefixes, old binding names) were **intentionally skipped** — this was
+> a clean-break rename: plugin id `lodestone`, `obsidian://lodestone`,
+> `/__lodestone/*` routes, `LODESTONE_*` bindings, `lodestone-server.zip`,
+> workflow files renamed. The GitHub repo was renamed to `austinermish/lodestone`
+> (old URLs redirect). Sections below are retained for reference; treat 3.1's shim
+> as NOT needed unless supporting pre-3.0 installs ever becomes a goal.
+
 **Decision made: the new name is Lodestone.** Do this after Phases 1–2 ship, before
 the large refactors (so the refactors land under the new name without double churn).
 
@@ -595,6 +605,40 @@ Priority order:
    code or dead weight in the 400 KB bundle; bump `@types/node` from ^16.
 6. Update CLAUDE.md architecture section after Phase 6 (main.ts description) and
    Phase 3 (all names).
+
+7. **README revision** (coordinate with the Phase 3 rebrand — do the content pass
+   in the same PR as the rename or just before it):
+   - **Remove both YouTube embeds** — the setup walkthrough (`README.md:35-37`) and
+     the R2 setup video (`README.md:57-59`), plus the R2 video link in
+     Troubleshooting (`README.md:153`). They're the original author's videos and
+     will rot. Replace with written steps: the setup walkthrough is mostly
+     redundant with the numbered "Get started" list already present; the R2 video
+     must be replaced by a short written subsection (create bucket → add binding
+     named `YAOS_BUCKET` → redeploy/refresh), which also feeds item 7.6's
+     in-plugin instructions.
+   - **Remove the superwhisper acknowledgement** (`README.md:175`) — stale upstream
+     text crediting a "landing page" that doesn't exist in this repo, with a
+     "temporary use" caveat that reads as an unresolved obligation.
+   - **Keep**: the hero screenshot and deploy button, the "How it works",
+     "Engineering", and "Limits" sections (genuinely good docs), the
+     Troubleshooting section, and the **Origin** section (Austin's deliberate
+     attribution — do not shorten it away during the rename; update repo links in
+     it if upstream moves).
+   - **Soften the comparison table's "Conflicts: None" claim** (`README.md:25`) —
+     CRDTs eliminate conflicted copies, not surprising merges; the Troubleshooting
+     section itself says merged results may need review. "Automatic (CRDT)" is
+     accurate and still differentiating.
+   - **Fix the Configuration table** (`README.md:119-133`): it documents an
+     "Exclude paths" setting that has no UI (see 7.15) and will keep drifting from
+     the real settings tab. Either sync it after the Phase 7 settings work, or slim
+     it to the 3-4 settings users actually search for and point at the settings tab
+     for the rest. Same consideration for the Commands table.
+   - Fold in the copy items already listed under Phase 7 quick wins (substantiate
+     "$0" with free-tier specifics; disclose the GitHub-account requirement for
+     Deploy-to-Cloudflare).
+   - All `austinermish/yaos` links, the BRAT slug, badge URLs, and the deploy
+     button URL change during Phase 3 — grep the README as part of the rename
+     inventory (3.2).
 
 ---
 

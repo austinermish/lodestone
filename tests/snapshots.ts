@@ -18,7 +18,7 @@
  *
  * Reads server/.env for local defaults when present, then falls back to
  * process env.
- * Uses a dedicated test vault ID unless YAOS_TEST_VAULT_ID is provided.
+ * Uses a dedicated test vault ID unless LODESTONE_TEST_VAULT_ID is provided.
  */
 
 import * as Y from "yjs";
@@ -47,11 +47,11 @@ try {
 	console.warn("Could not read server/.env — falling back to process env for live endpoint tests.");
 }
 
-const HOST = process.env.YAOS_TEST_HOST ?? envVars.YAOS_TEST_HOST ?? "http://127.0.0.1:8787";
+const HOST = process.env.LODESTONE_TEST_HOST ?? envVars.LODESTONE_TEST_HOST ?? "http://127.0.0.1:8787";
 const TOKEN = process.env.SYNC_TOKEN ?? envVars.SYNC_TOKEN ?? "";
 const TEST_VAULT_ID =
-	process.env.YAOS_TEST_VAULT_ID
-	?? envVars.YAOS_TEST_VAULT_ID
+	process.env.LODESTONE_TEST_VAULT_ID
+	?? envVars.LODESTONE_TEST_VAULT_ID
 	?? `cli-test-${Date.now().toString(36)}`;
 
 function baseUrl(): string {

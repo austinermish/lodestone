@@ -7,7 +7,7 @@ with Aaron (spoke) and the fixes shipped in 2.5.8 and 2.5.9.
 
 ## Background
 
-Room sync is the multi-vault collaboration feature in YAOS. A "hub" vault shares one or more
+Room sync is the multi-vault collaboration feature in Lodestone. A "hub" vault shares one or more
 folders via a room (Durable Object). "Spoke" vaults join via an invite URL and receive a
 mirror of those folders. Both hub and spoke connect to the **same** Durable Object room Y.Doc
 as peers in a y-partyserver session.

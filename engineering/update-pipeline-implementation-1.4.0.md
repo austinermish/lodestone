@@ -1,6 +1,6 @@
-# YAOS 1.4.0: Update Pipeline Implementation
+# Lodestone 1.4.0: Update Pipeline Implementation
 
-This note captures what actually shipped in YAOS `1.4.0`.
+This note captures what actually shipped in Lodestone `1.4.0`.
 
 The existing RFC, [`engineering/zero-ops-update-pipeline.md`](./zero-ops-update-pipeline.md),
 explains the architectural problem and the desired model. This document is the
@@ -23,7 +23,7 @@ new sync semantics release. The center of gravity was operational:
 
 ## 1. Reusable ops workflows
 
-Reusable GitHub Actions workflows were added so generated YAOS server repos can
+Reusable GitHub Actions workflows were added so generated Lodestone server repos can
 run update/revert operations without every detached fork having to carry all of
 the update logic locally.
 
@@ -90,7 +90,7 @@ That documentation was part of the release, not an afterthought.
 
 ## Safety properties established by 1.4.0
 
-After `1.4.0`, YAOS had these important properties:
+After `1.4.0`, Lodestone had these important properties:
 
 - detached Deploy-to-Cloudflare installs had a real update path
 - updater configuration lived on the server and could hydrate onto new devices
@@ -116,5 +116,5 @@ release." That undersells the actual result.
 
 The durable contribution of `1.4.0` was this:
 
-- YAOS stopped being "easy to deploy on Day 1, awkward to maintain on Day 2"
+- Lodestone stopped being "easy to deploy on Day 1, awkward to maintain on Day 2"
 - and became a system with an explicit server update lifecycle
