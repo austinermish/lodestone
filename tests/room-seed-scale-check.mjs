@@ -54,7 +54,8 @@ async function syncDoc(vaultId, token, ydoc, { pushOnly = false } = {}) {
 	});
 	await new Promise((resolvePromise, rejectPromise) => {
 		const timeout = setTimeout(() => rejectPromise(new Error(`sync timeout for ${vaultId}`)), 30_000);
-		provider.on("synced", () => {
+		provider.on("sync", (synced) => {
+			if (!synced) return;
 			clearTimeout(timeout);
 			resolvePromise();
 		});
