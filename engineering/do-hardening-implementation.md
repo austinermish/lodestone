@@ -9,7 +9,7 @@ and what tradeoffs remain intentional.
 
 ## Trigger
 
-This work was driven by real production logs from a live YAOS deployment.
+This work was driven by real production logs from a live Lodestone deployment.
 
 Observed error:
 
@@ -18,8 +18,8 @@ Observed error:
 Surfaces involved:
 
 - websocket traffic
-- `/__yaos/trace`
-- `/__yaos/document`
+- `/__lodestone/trace`
+- `/__lodestone/document`
 
 The important conclusion was that the chunked checkpoint/journal engine was not
 the culprit. That storage path was already chunked. The production failure came
@@ -70,9 +70,9 @@ To close that gap:
 
 The room DO now handles these paths before the main document hydration path:
 
-- `/__yaos/trace`
-- `/__yaos/debug`
-- `/__yaos/meta`
+- `/__lodestone/trace`
+- `/__lodestone/debug`
+- `/__lodestone/meta`
 
 This keeps observability and metadata requests cheap and prevents them from
 waking the full CRDT state just to answer a small diagnostic query.
@@ -142,6 +142,6 @@ What it changed was the shape of the server hot path:
 - cold-start work is less wasteful
 - daily snapshot creation is deterministic under concurrency
 
-In practical terms, YAOS moved from "architecturally sound but with one real
+In practical terms, Lodestone moved from "architecturally sound but with one real
 production poison pill" to "architecturally sound and materially harder to take
 down with its own control paths."

@@ -103,7 +103,7 @@ const UPDATE_MANIFEST_URLS = [
 	"https://github.com/austinermish/lodestone/releases/latest/download/update-manifest.json",
 ] as const;
 const UPDATE_MANIFEST_CACHE_MS = 24 * 60 * 60 * 1000;
-const GITHUB_OPS_WORKFLOW_PATH = ".github/workflows/yaos-ops.yml";
+const GITHUB_OPS_WORKFLOW_PATH = ".github/workflows/lodestone-ops.yml";
 
 /** Apply a spoke pathAliases map to a CRDT-side path, yielding the local disk path. */
 function applyAlias(crdtPath: string, aliases: Record<string, string>): string {
@@ -134,7 +134,7 @@ function buildGithubOpsBootstrapWorkflowYaml(): string {
 		"  contents: write",
 		"jobs:",
 		"  run:",
-		"    uses: austinermish/lodestone/.github/workflows/yaos-ops-reusable.yml@main",
+		"    uses: austinermish/lodestone/.github/workflows/lodestone-ops-reusable.yml@main",
 		"    with:",
 		"      action: ${{ github.event.inputs.action }}",
 		"      version: ${{ github.event.inputs.version }}",
@@ -414,7 +414,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	async onload() {
 		const onloadStartedAt = Date.now();
 		await this.loadSettings();
-		this.registerObsidianProtocolHandler("yaos", (params) => {
+		this.registerObsidianProtocolHandler("lodestone", (params) => {
 			void this.handleSetupLink(params);
 		});
 
@@ -674,7 +674,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			// Schema version check — refuse to run if a newer plugin wrote this data
 			const schemaError = this.vaultSync.checkSchemaVersion();
 			if (schemaError) {
-				console.error(`[yaos] ${schemaError}`);
+				console.error(`[lodestone] ${schemaError}`);
 				new Notice(`Lodestone: ${schemaError}`);
 				this.updateStatusBar("error");
 				return;
@@ -744,7 +744,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			// Start room syncs after personal sync is up.
 			await this.startAllRooms();
 		} catch (err) {
-			console.error("[yaos] Failed to initialize sync:", err);
+			console.error("[lodestone] Failed to initialize sync:", err);
 			new Notice(`Lodestone: failed to initialize — ${formatUnknown(err)}`);
 			this.updateStatusBar("error");
 		}
@@ -1052,7 +1052,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					diskFiles.set(file.path, content);
 				} catch (err) {
 					console.error(
-						`[yaos] Failed to read "${file.path}":`,
+						`[lodestone] Failed to read "${file.path}":`,
 						err,
 					);
 				}
@@ -1070,7 +1070,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					diskFiles.set(file.path, content);
 				} catch (err) {
 					console.error(
-						`[yaos] Failed to read "${file.path}" during reconciliation:`,
+						`[lodestone] Failed to read "${file.path}" during reconciliation:`,
 						err,
 					);
 				}
@@ -1118,7 +1118,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 						`refusing to overwrite ${destructiveCount} local files ` +
 						`(${Math.round(destructiveRatio * 100)}% of disk files)`;
 					this.log(`Reconcile safety brake: ${safetyBrakeReason}.`);
-					console.error(`[yaos] Reconcile safety brake: ${safetyBrakeReason}.`);
+					console.error(`[lodestone] Reconcile safety brake: ${safetyBrakeReason}.`);
 					new Notice(
 						`Lodestone: Reconcile safety brake — ${safetyBrakeReason}. ` +
 						`Additive creates will continue. Export diagnostics and inspect logs.`,
@@ -1249,7 +1249,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				imported++;
 			} catch (err) {
 				console.error(
-					`[yaos] importUntracked failed for "${path}":`,
+					`[lodestone] importUntracked failed for "${path}":`,
 					err,
 				);
 			}
@@ -1468,7 +1468,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		void this.processDirtyMarkdownPath(path, "modify")
 			.catch((err) => {
 				console.error(
-					`[yaos] closed-only deferred import failed for "${path}" (${reason}):`,
+					`[lodestone] closed-only deferred import failed for "${path}" (${reason}):`,
 					err,
 				);
 			})
@@ -1792,7 +1792,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			callback: () => {
 				const info = this.buildDebugInfo();
 				new Notice(info, 10000);
-				console.debug("[yaos] Debug status:\n" + info);
+				console.debug("[lodestone] Debug status:\n" + info);
 			},
 		});
 
@@ -1805,7 +1805,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					() => new Notice("Debug info copied to clipboard."),
 					() => new Notice("Failed to copy to clipboard. Check console.", 5000),
 				);
-				console.debug("[yaos] Debug info:\n" + info);
+				console.debug("[lodestone] Debug info:\n" + info);
 			},
 		});
 
@@ -1815,7 +1815,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			callback: () => {
 				const text = this.buildRecentEventsText(80);
 				new Notice("Recent sync events printed to console.", 5000);
-				console.debug("[yaos] Recent sync events:\n" + text);
+				console.debug("[lodestone] Recent sync events:\n" + text);
 			},
 		});
 
@@ -1891,7 +1891,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 							await VaultSync.deleteIdb(vaultId);
 							this.log("Reset cache: IDB deleted");
 						} catch (err) {
-							console.error("[yaos] Failed to delete IDB:", err);
+							console.error("[lodestone] Failed to delete IDB:", err);
 						}
 
 							this.log("Reset cache: reinitializing");
@@ -1940,7 +1940,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 						new Notice("Snapshot created.");
 					}
 				} catch (err) {
-					console.error("[yaos] Snapshot failed:", err);
+					console.error("[lodestone] Snapshot failed:", err);
 					new Notice(`Snapshot failed: ${formatUnknown(err)}`);
 				}
 			},
@@ -2007,7 +2007,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 							await VaultSync.deleteIdb(vaultId);
 							this.log("Nuclear reset: IDB deleted");
 						} catch (err) {
-							console.error("[yaos] Failed to delete IDB:", err);
+							console.error("[lodestone] Failed to delete IDB:", err);
 						}
 
 						this.log("Nuclear reset: reinitializing (will re-seed from disk)");
@@ -2120,7 +2120,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		if (this.markdownDrainPromise) return;
 		this.markdownDrainPromise = this.drainDirtyMarkdownPaths()
 			.catch((err) => {
-				console.error("[yaos] markdown drain failed:", err);
+				console.error("[lodestone] markdown drain failed:", err);
 			})
 			.finally(() => {
 				this.markdownDrainPromise = null;
@@ -2319,7 +2319,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				await this.updateDiskIndexForPath(file.path);
 			} catch (err) {
 				console.error(
-					`[yaos] syncFileFromDisk failed for "${file.path}":`,
+					`[lodestone] syncFileFromDisk failed for "${file.path}":`,
 					err,
 				);
 			}
@@ -2357,7 +2357,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			}
 			await this.updateDiskIndexForPath(file.path);
 		} catch (err) {
-			console.error(`[yaos] syncFileFromDisk (room) failed for "${file.path}":`, err);
+			console.error(`[lodestone] syncFileFromDisk (room) failed for "${file.path}":`, err);
 		}
 	}
 
@@ -3313,7 +3313,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			token,
 			vaultId,
 		});
-		return `obsidian://yaos?${params.toString()}`;
+		return `obsidian://lodestone?${params.toString()}`;
 	}
 
 	buildMobileSetupUrl(): string | null {
@@ -3594,7 +3594,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		}
 	}
 
-	/** Parse and apply a room invite URL (obsidian://yaos?action=room&…). Called from settings UI. */
+	/** Parse and apply a room invite URL (obsidian://lodestone?action=room&…). Called from settings UI. */
 	async handleRoomInviteUrl(rawUrl: string, pathAliases: Record<string, string> = {}): Promise<void> {
 		let params: URLSearchParams;
 		try {
@@ -4183,7 +4183,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const normalizedRepoUrl = repoUrl.replace(/\/+$/, "").replace(/\.git$/, "");
 		const branch = this.settings.updateRepoBranch.trim() || this.serverCapabilities?.updateRepoBranch || "main";
 		if (provider === "github") {
-			return `${normalizedRepoUrl}/actions/workflows/yaos-ops.yml`;
+			return `${normalizedRepoUrl}/actions/workflows/lodestone-ops.yml`;
 		}
 		if (provider === "gitlab") {
 			return `${normalizedRepoUrl}/-/pipelines/new?ref=${encodeURIComponent(branch)}`;
@@ -4761,7 +4761,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	}
 
 	private async ensureDiagnosticsDir(): Promise<string> {
-		const diagDir = normalizePath(`${this.app.vault.configDir}/plugins/yaos/diagnostics`);
+		const diagDir = normalizePath(`${this.app.vault.configDir}/plugins/lodestone/diagnostics`);
 		if (!(await this.app.vault.adapter.exists(diagDir))) {
 			await this.app.vault.adapter.mkdir(diagDir);
 		}
@@ -5003,7 +5003,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			}
 		} catch (err) {
 			// Don't spam the user — snapshot failure is non-critical
-			console.warn("[yaos] Daily snapshot failed:", err);
+			console.warn("[lodestone] Daily snapshot failed:", err);
 		}
 	}
 
@@ -5033,7 +5033,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				await this.showSnapshotDiff(selected);
 			}).open();
 		} catch (err) {
-			console.error("[yaos] Failed to list snapshots:", err);
+			console.error("[lodestone] Failed to list snapshots:", err);
 			new Notice(`Failed to list snapshots: ${formatUnknown(err)}`);
 		}
 	}
@@ -5087,7 +5087,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 					// Save current content of files we're about to overwrite
 					// so the user can recover if the restore goes wrong.
 					const backupDir = normalizePath(
-						`${this.app.vault.configDir}/plugins/yaos/restore-backups/${new Date().toISOString().replace(/[:.]/g, "-")}`,
+						`${this.app.vault.configDir}/plugins/lodestone/restore-backups/${new Date().toISOString().replace(/[:.]/g, "-")}`,
 					);
 					let backedUp = 0;
 					for (const path of markdownPaths) {
@@ -5154,7 +5154,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				cleanup,
 			).open();
 		} catch (err) {
-			console.error("[yaos] Snapshot diff failed:", err);
+			console.error("[lodestone] Snapshot diff failed:", err);
 			new Notice(`Failed to load snapshot: ${formatUnknown(err)}`);
 		}
 	}
@@ -5166,7 +5166,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		}
 		this.trace("plugin", msg);
 		if (this.settings.debug) {
-				console.debug(`[yaos] ${msg}`);
+				console.debug(`[lodestone] ${msg}`);
 		}
 	}
 

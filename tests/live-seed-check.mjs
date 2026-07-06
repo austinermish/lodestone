@@ -2,13 +2,13 @@ import * as Y from "yjs";
 import YSyncProvider from "y-partyserver/provider";
 import WebSocket from "ws";
 
-const host = process.env.YAOS_TEST_HOST;
+const host = process.env.LODESTONE_TEST_HOST;
 const token = process.env.SYNC_TOKEN;
-const room = process.env.YAOS_TEST_VAULT_ID;
-const mode = process.env.YAOS_TEST_MODE ?? "seed";
+const room = process.env.LODESTONE_TEST_VAULT_ID;
+const mode = process.env.LODESTONE_TEST_MODE ?? "seed";
 
 if (!host || !token || !room) {
-	throw new Error("YAOS_TEST_HOST, SYNC_TOKEN, and YAOS_TEST_VAULT_ID are required");
+	throw new Error("LODESTONE_TEST_HOST, SYNC_TOKEN, and LODESTONE_TEST_VAULT_ID are required");
 }
 
 const ydoc = new Y.Doc();
@@ -71,7 +71,7 @@ provider.on("sync", (synced) => {
 			ytext.delete(0, ytext.length);
 			ytext.insert(
 				0,
-				`YAOS redeploy durability test\nts=${new Date().toISOString()}\nvault=${room}\nmode=${mode}`,
+				`Lodestone redeploy durability test\nts=${new Date().toISOString()}\nvault=${room}\nmode=${mode}`,
 			);
 			meta.set(fileId, { path: "redeploy-test.md", mtime: Date.now() });
 		});

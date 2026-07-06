@@ -1,10 +1,10 @@
-# YAOS
+# Lodestone
 
 **A zero-terminal, real-time sync engine for Obsidian, powered by your own Cloudflare Worker.**
 
 Your notes stay in sync instantly across devices, without conflicted copies, delayed file sync, or database-heavy self-hosting.
 
-<img src="https://github.com/user-attachments/assets/ee937050-8a05-4d56-9c5f-3ae5003496fc" alt="YAOS syncing a note across desktop and mobile in real time" width="720" />
+<img src="https://github.com/user-attachments/assets/ee937050-8a05-4d56-9c5f-3ae5003496fc" alt="Lodestone syncing a note across desktop and mobile in real time" width="720" />
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/austinermish/lodestone/tree/main/server)
 
@@ -14,7 +14,7 @@ No terminal, no `.env` files, no database setup required.
 
 ## How it compares
 
-Most ways to sync Obsidian pick a trade-off. YAOS picks none.
+Most ways to sync Obsidian pick a trade-off. Lodestone picks none.
 
 | | Conflicts | Real-time | Self-hosted | No terminal | Free |
 |---|:---:|:---:|:---:|:---:|:---:|
@@ -22,15 +22,15 @@ Most ways to sync Obsidian pick a trade-off. YAOS picks none.
 | **Obsidian Sync** | Rare | Delayed | No | Yes | $96/yr |
 | **Git / LiveSync** | Manual | Varies | Yes | No | Yes |
 | **Relay / Screengarden** | No | Yes | No | Yes | Freemium |
-| **YAOS** | **None** | **Yes** | **Yes** | **Yes** | **$0** |
+| **Lodestone** | **None** | **Yes** | **Yes** | **Yes** | **$0** |
 
-YAOS uses [Yjs CRDTs](https://yjs.dev) to keep one live vault state moving across devices instead of asking them to take polite turns uploading files and hoping nothing collides.
+Lodestone uses [Yjs CRDTs](https://yjs.dev) to keep one live vault state moving across devices instead of asking them to take polite turns uploading files and hoping nothing collides.
 
-If you want the official, fully managed experience, pay for Obsidian Sync and support the team. If you want a fast, self-hosted, local-first alternative that you fully control, this is YAOS.
+If you want the official, fully managed experience, pay for Obsidian Sync and support the team. If you want a fast, self-hosted, local-first alternative that you fully control, this is Lodestone.
 
 ## Get started
 
-YAOS has two parts: an Obsidian plugin and a small Cloudflare server you deploy to your own account. The Worker setup page walks you through the remaining steps, so you don't need to memorize this.
+Lodestone has two parts: an Obsidian plugin and a small Cloudflare server you deploy to your own account. The Worker setup page walks you through the remaining steps, so you don't need to memorize this.
 
 <a href="https://youtu.be/xeS126_XK9Q">
   <img src="https://img.youtube.com/vi/xeS126_XK9Q/maxresdefault.jpg" width="480" alt="Watch the setup walkthrough" />
@@ -43,10 +43,10 @@ Click **Deploy to Cloudflare** above. Cloudflare creates a Worker in your accoun
 Open the Worker URL. Click **Claim** to lock the server to you and generate your setup token.
 
 **3. Install the plugin**
-YAOS is in the Obsidian Marketplace review queue. To install today, add it through [BRAT](https://github.com/TfTHacker/obsidian42-brat): open BRAT settings → **Add Beta plugin** → paste `austinermish/lodestone`.
+Lodestone is in the Obsidian Marketplace review queue. To install today, add it through [BRAT](https://github.com/TfTHacker/obsidian42-brat): open BRAT settings → **Add Beta plugin** → paste `austinermish/lodestone`.
 
 **4. Connect your vault**
-From the claim page, open the setup link or scan the QR code. YAOS fills in the connection details automatically.
+From the claim page, open the setup link or scan the QR code. Lodestone fills in the connection details automatically.
 
 That's it. Your vault is syncing.
 
@@ -62,25 +62,25 @@ R2 also enables daily automatic snapshots and on-demand point-in-time backups. Y
 
 ## Updating your server
 
-YAOS is designed to be zero-terminal, but because you own your infrastructure, you control when updates apply.
+Lodestone is designed to be zero-terminal, but because you own your infrastructure, you control when updates apply.
 
 A one-time setup installs a GitHub Actions workflow in your deployment repo. After that, updates are a single click.
 
-1. **One-time**: click **Initialize updater** in YAOS settings → **Advanced**. GitHub opens with a pre-filled workflow file. Commit it.
-2. **Update**: YAOS notifies you when a new version ships. Click **Open update action** → **Run workflow** with `update`.
+1. **One-time**: click **Initialize updater** in Lodestone settings → **Advanced**. GitHub opens with a pre-filled workflow file. Commit it.
+2. **Update**: Lodestone notifies you when a new version ships. Click **Open update action** → **Run workflow** with `update`.
 3. **Rollback**: same workflow, change action to `revert`.
 
-Some releases require manual migration steps. The updater will abort with a clear warning — read the release notes before retrying. Re-clicking Deploy to Cloudflare is not a safe update path for a stateful server; YAOS uses a Git-driven workflow so the same Worker identity, Durable Object bindings, and history are preserved.
+Some releases require manual migration steps. The updater will abort with a clear warning — read the release notes before retrying. Re-clicking Deploy to Cloudflare is not a safe update path for a stateful server; Lodestone uses a Git-driven workflow so the same Worker identity, Durable Object bindings, and history are preserved.
 
 ## Works with scripts and AI agents
 
-Because Obsidian vaults are just local Markdown files, YAOS plays unusually well with scripts, CLI tools, and AI agents that edit files directly on disk. The CRDT state stays aligned with the filesystem, so changes from any source — git, shell scripts, agents writing to disk — propagate cleanly across devices instead of falling back to conflicted-copy workflows.
+Because Obsidian vaults are just local Markdown files, Lodestone plays unusually well with scripts, CLI tools, and AI agents that edit files directly on disk. The CRDT state stays aligned with the filesystem, so changes from any source — git, shell scripts, agents writing to disk — propagate cleanly across devices instead of falling back to conflicted-copy workflows.
 
-If you're building agentic workflows on top of Obsidian vaults, YAOS gives you the sync infrastructure so you don't have to wire up your own.
+If you're building agentic workflows on top of Obsidian vaults, Lodestone gives you the sync infrastructure so you don't have to wire up your own.
 
 ## How it works
 
-YAOS keeps your vault as normal local files, while also maintaining a shared real-time state for sync.
+Lodestone keeps your vault as normal local files, while also maintaining a shared real-time state for sync.
 
 1. Each markdown file gets a stable ID and a `Y.Text` CRDT for its content.
 2. All per-file CRDTs live inside one shared vault-level `Y.Doc` — this keeps cross-file operations transactional. A folder rename is atomic across all files; the vault structure can't tear.
@@ -90,7 +90,7 @@ YAOS keeps your vault as normal local files, while also maintaining a shared rea
 6. Attachments sync separately via content-addressed R2 storage instead of being forced through the text CRDT.
 7. Daily and on-demand snapshots exist as a safety net.
 
-In practice, that means your vault still exists locally as normal files, Obsidian keeps behaving like Obsidian, and YAOS keeps the disk mirror and the shared CRDT state aligned instead of asking devices to take polite turns uploading files later.
+In practice, that means your vault still exists locally as normal files, Obsidian keeps behaving like Obsidian, and Lodestone keeps the disk mirror and the shared CRDT state aligned instead of asking devices to take polite turns uploading files later.
 
 ## Engineering
 
@@ -100,21 +100,21 @@ This repository keeps deep architecture notes under [`engineering/`](./engineeri
 - **[Filesystem bridge](./engineering/filesystem-bridge.md)** — How noisy Obsidian file events are converted into safe CRDT updates with dirty-set draining and content-acknowledged suppression.
 - **[Checkpoint + journal persistence](./engineering/checkpoint-journal.md)** — The storage-engine rewrite that removed full-state rewrites and introduced state-vector-anchored delta journaling.
 - **[Attachment sync](./engineering/attachment-sync.md)** — Native Worker proxy uploads, capability negotiation, and bounded fan-out under Cloudflare connection limits.
-- **[Zero-config auth](./engineering/zero-config-auth.md)** — Browser claim UX, `obsidian://yaos` deep-link pairing, and env-token override behavior.
+- **[Zero-config auth](./engineering/zero-config-auth.md)** — Browser claim UX, `obsidian://lodestone` deep-link pairing, and env-token override behavior.
 - **[Zero-ops update pipeline](./engineering/zero-ops-update-pipeline.md)** — Why detached deploy repos need bootstrap injection, reusable workflows, and migration safety gates.
 - **[Warts and limits](./engineering/warts-and-limits.md)** — Canonical limits, safety invariants, and the pragmatic compromises currently in production.
 
 ## Limits
 
-YAOS is optimized for personal or small-team note vaults, not for arbitrarily huge text archives. The monolithic `Y.Doc` design gives excellent real-time ergonomics and simpler cross-file behavior, but it creates a practical ceiling for very large vaults.
+Lodestone is optimized for personal or small-team note vaults, not for arbitrarily huge text archives. The monolithic `Y.Doc` design gives excellent real-time ergonomics and simpler cross-file behavior, but it creates a practical ceiling for very large vaults.
 
-If your vault is normal notes, drafts, research, and attachments, YAOS is a great fit. If you want to sync giant text dumps or archival datasets, a simpler file-sync tool is a better choice.
+If your vault is normal notes, drafts, research, and attachments, Lodestone is a great fit. If you want to sync giant text dumps or archival datasets, a simpler file-sync tool is a better choice.
 
 Rule of thumb: around 50 MB of raw text (not counting attachments like images and PDFs) is a comfortable target.
 
 ## Configuration
 
-After enabling, go to **Settings → YAOS**.
+After enabling, go to **Settings → Lodestone**.
 
 | Setting | Description |
 |---------|-------------|
@@ -127,7 +127,7 @@ After enabling, go to **Settings → YAOS**.
 | **Max attachment size** | Skip attachments larger than this (default 10 MB) |
 | **Parallel transfers** | Number of simultaneous attachment upload/download slots |
 | **Show remote cursors** | Display cursor positions and selections from other devices |
-| **Edits from other apps** | Control how YAOS handles changes from git, scripts, or other editors |
+| **Edits from other apps** | Control how Lodestone handles changes from git, scripts, or other editors |
 | **Debug logging** | Verbose console output for troubleshooting |
 
 `Manual connection` and `Advanced` sections are available in the settings UI when you need to inspect or override connection details.
@@ -150,7 +150,7 @@ Access via command palette (Ctrl/Cmd+P):
 
 **"Unauthorized" errors**: Token mismatch between plugin and server. Check both match exactly.
 
-**"R2 not configured"**: The server doesn't have a `YAOS_BUCKET` binding yet. See the [R2 setup video](https://youtu.be/Z7xCMEYfdFM).
+**"R2 not configured"**: The server doesn't have a `LODESTONE_BUCKET` binding yet. See the [R2 setup video](https://youtu.be/Z7xCMEYfdFM).
 
 **Cloudflare deploy/dashboard issues**: If build queue or dashboard behavior is flaky, see [server troubleshooting notes](./server/README.md#transient-cloudflare-deployment-issues), including the `wrangler.toml` R2-binding fallback.
 
@@ -162,7 +162,7 @@ Access via command palette (Ctrl/Cmd+P):
 
 ## Origin
 
-YAOS started as a fork of [kavinsood/yaos](https://github.com/kavinsood/yaos), an excellent Cloudflare-native real-time sync engine for Obsidian. Full credit to Kavin for the original architecture: Durable Object sync rooms, Yjs CRDTs for conflict-free merges, and R2-backed attachments and snapshots — the hard part of this project.
+Lodestone started as a fork of [kavinsood/yaos](https://github.com/kavinsood/yaos), an excellent Cloudflare-native real-time sync engine for Obsidian. Full credit to Kavin for the original architecture: Durable Object sync rooms, Yjs CRDTs for conflict-free merges, and R2-backed attachments and snapshots — the hard part of this project.
 
 Upstream YAOS uses a **vault pool** topology, where every connected vault shares every other vault's files and folders symmetrically. This fork changes that to a **hub/spoke** topology instead: one host vault, one or more spoke vaults, with real-time collaborative editing in both directions, but structural changes (creating, renaming, moving, or deleting files and folders) restricted to the host. That's a different sharing model than upstream, not just a feature add-on, which is why this lives as its own repository rather than a PR back upstream.
 

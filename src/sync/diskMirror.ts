@@ -497,7 +497,7 @@ export class DiskMirror {
 				);
 			}
 		} catch (err) {
-			console.error(`[yaos] flushWrite failed for "${path}":`, err);
+			console.error(`[lodestone] flushWrite failed for "${path}":`, err);
 		}
 	}
 
@@ -584,7 +584,7 @@ export class DiskMirror {
 				this.log(`handleRemoteDelete: deleted "${path}" from disk`);
 			} catch (err) {
 				console.error(
-					`[yaos] handleRemoteDelete failed for "${path}":`,
+					`[lodestone] handleRemoteDelete failed for "${path}":`,
 					err,
 				);
 			}
@@ -659,7 +659,7 @@ export class DiskMirror {
 					}
 				}
 			} catch (err) {
-				console.error(`[yaos] handleRemoteRename failed for "${oldDiskNormalized}" -> "${newDiskNormalized}":`, err);
+				console.error(`[lodestone] handleRemoteRename failed for "${oldDiskNormalized}" -> "${newDiskNormalized}":`, err);
 			}
 		}
 
@@ -828,7 +828,7 @@ export class DiskMirror {
 	private log(msg: string): void {
 		this.trace?.("disk", msg);
 		if (this.debug) {
-			console.debug(`[yaos:disk] ${msg}`);
+			console.debug(`[lodestone:disk] ${msg}`);
 		}
 	}
 

@@ -1,4 +1,4 @@
-# YAOS QA History and Coverage
+# Lodestone QA History and Coverage
 
 This document records what we tested, what broke, what we changed, and final
 QA outcomes.
@@ -23,7 +23,7 @@ deployment.
 
 Observed production issue:
 
-- `SQLITE_TOOBIG` on websocket, `/__yaos/trace`, and `/__yaos/document` paths
+- `SQLITE_TOOBIG` on websocket, `/__lodestone/trace`, and `/__lodestone/document` paths
 
 Root cause:
 
@@ -33,7 +33,7 @@ What changed:
 
 - trace storage redesigned to bounded per-entry records
 - trace persistence made fail-open
-- `/__yaos/trace`, `/__yaos/debug`, and `/__yaos/meta` moved above hydration
+- `/__lodestone/trace`, `/__lodestone/debug`, and `/__lodestone/meta` moved above hydration
 - schema admission moved to metadata-first probing via `roomMeta`
 - cold-start room loading gated behind single-flight logic
 - snapshot `maybe` serialized inside the room DO
@@ -58,7 +58,7 @@ Updates were merged to `main` and released in `v1.2.1`.
 What we fixed:
 
 - command IDs were normalized for marketplace compliance (13 IDs; removed
-  `yaos-` prefix)
+  `lodestone-` prefix)
 - non-core deletion paths (migration/debug surfaces) were moved to
   `fileManager.trashFile()`
 
@@ -248,7 +248,7 @@ Two-vault desktop pass using `attachment-test` and `attachment-test copy`
 validated the remaining snapshot/recovery surface:
 
 - R2 capability auto-enable passed in both lifecycle cases:
-  - primary vault was already open when the worker gained `YAOS_BUCKET`
+  - primary vault was already open when the worker gained `LODESTONE_BUCKET`
   - secondary vault was opened only after redeploy
 - attachment engine auto-started without manual refresh or manual toggle
 - initial attachment upload/download converged to `blobPathCount=4` on both
@@ -262,15 +262,15 @@ validated the remaining snapshot/recovery surface:
 Evidence from exported diagnostics/traces:
 
 - primary vault:
-  - `/home/kavin/attachment-test/.obsidian/plugins/yaos/diagnostics/sync-diagnostics-2026-03-10T14-23-06-853Z-device-mmkp74h1.json`
-  - `/home/kavin/attachment-test/.obsidian/plugins/yaos/diagnostics/sync-diagnostics-2026-03-10T14-29-38-322Z-device-mmkp74h1.json`
-  - `/home/kavin/attachment-test/.obsidian/plugins/yaos/diagnostics/sync-diagnostics-2026-03-10T14-32-32-221Z-device-mmkp74h1.json`
+  - `/home/kavin/attachment-test/.obsidian/plugins/lodestone/diagnostics/sync-diagnostics-2026-03-10T14-23-06-853Z-device-mmkp74h1.json`
+  - `/home/kavin/attachment-test/.obsidian/plugins/lodestone/diagnostics/sync-diagnostics-2026-03-10T14-29-38-322Z-device-mmkp74h1.json`
+  - `/home/kavin/attachment-test/.obsidian/plugins/lodestone/diagnostics/sync-diagnostics-2026-03-10T14-32-32-221Z-device-mmkp74h1.json`
 - secondary vault:
-  - `/home/kavin/attachment-test copy/.obsidian/plugins/yaos/diagnostics/sync-diagnostics-2026-03-10T14-30-29-710Z-device-second.json`
-  - `/home/kavin/attachment-test copy/.obsidian/plugins/yaos/diagnostics/sync-diagnostics-2026-03-10T14-32-38-698Z-device-second.json`
-  - `/home/kavin/attachment-test copy/.obsidian/plugins/yaos/logs/current-state.json`
-  - `/home/kavin/attachment-test copy/.obsidian/plugins/yaos/restore-backups/2026-03-10T14-32-33-577Z/Welcome.md`
-  - `/home/kavin/attachment-test copy/.obsidian/plugins/yaos/restore-backups/2026-03-10T14-32-33-577Z/wallpapers/quota.md`
+  - `/home/kavin/attachment-test copy/.obsidian/plugins/lodestone/diagnostics/sync-diagnostics-2026-03-10T14-30-29-710Z-device-second.json`
+  - `/home/kavin/attachment-test copy/.obsidian/plugins/lodestone/diagnostics/sync-diagnostics-2026-03-10T14-32-38-698Z-device-second.json`
+  - `/home/kavin/attachment-test copy/.obsidian/plugins/lodestone/logs/current-state.json`
+  - `/home/kavin/attachment-test copy/.obsidian/plugins/lodestone/restore-backups/2026-03-10T14-32-33-577Z/Welcome.md`
+  - `/home/kavin/attachment-test copy/.obsidian/plugins/lodestone/restore-backups/2026-03-10T14-32-33-577Z/wallpapers/quota.md`
 
 Observed residual noise:
 
@@ -281,7 +281,7 @@ Observed residual noise:
 ## Run A completion (March 8, 2026)
 
 - Migration/divergence mini-run is completed and passes.
-- New room bootstrapped on `https://yaos.ripplor.workers.dev` with
+- New room bootstrapped on `https://lodestone.ripplor.workers.dev` with
   `vaultId=FMW0Anw7NTF3Kev9gsnW8g`.
 - First run exposed server regression (`1101`, durable object `.name` access
   before set-name). Fixed in `server/src/server.ts` and redeployed.

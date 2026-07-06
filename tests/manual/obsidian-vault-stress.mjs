@@ -7,10 +7,10 @@ const rounds = Math.max(40, Number.parseInt(process.argv[3] ?? "120", 10));
 const maxFileBytes = Math.max(256 * 1024, Number.parseInt(process.argv[4] ?? `${2 * 1024 * 1024}`, 10));
 const profile = (process.argv[5] ?? "all").trim();
 const writeMode = (process.argv[6] ?? "atomic").trim().toLowerCase();
-const qaDir = path.join(vaultRoot, "yaos", "qa-stress");
+const qaDir = path.join(vaultRoot, "lodestone", "qa-stress");
 const reportPath = path.join(
 	"/tmp",
-	`yaos-stress-report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+	`lodestone-stress-report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
 );
 
 const ICONS = ["🔺", "🔹", "🔸", "🔻"];
@@ -465,7 +465,7 @@ async function analyzeFile(filePath) {
 }
 
 async function readQuarantineState() {
-	const pluginDataPath = path.join(vaultRoot, ".obsidian", "plugins", "yaos", "data.json");
+	const pluginDataPath = path.join(vaultRoot, ".obsidian", "plugins", "lodestone", "data.json");
 	try {
 		const raw = await readText(pluginDataPath);
 		const parsed = JSON.parse(raw);

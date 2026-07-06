@@ -1,4 +1,4 @@
-name: YAOS Server Ops (Reusable)
+name: Lodestone Server Ops (Reusable)
 
 on:
   workflow_call:
@@ -35,14 +35,14 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
-      - name: Apply YAOS server artifact
+      - name: Apply Lodestone server artifact
         if: ${{ inputs.action == 'update' }}
         env:
-          YAOS_RELEASE_REPO: ${{ inputs.release_repo }}
-          YAOS_RELEASE_VERSION: ${{ inputs.version }}
+          LODESTONE_RELEASE_REPO: ${{ inputs.release_repo }}
+          LODESTONE_RELEASE_VERSION: ${{ inputs.version }}
         run: node scripts/update-from-release.mjs
 
-      - name: Revert last YAOS update commit
+      - name: Revert last Lodestone update commit
         if: ${{ inputs.action == 'revert' }}
         run: node scripts/revert-last-update.mjs
 
@@ -51,11 +51,11 @@ jobs:
         run: |
           git add -A
           if git diff --cached --quiet; then
-            echo "No YAOS server changes to commit."
+            echo "No Lodestone server changes to commit."
             exit 0
           fi
           VERSION="$(node -p "require('./package.json').version")"
-          git commit -m "yaos(server): update to ${VERSION}"
+          git commit -m "lodestone(server): update to ${VERSION}"
           git push
 
       - name: Push revert commit

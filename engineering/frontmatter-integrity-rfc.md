@@ -1,7 +1,7 @@
 # Frontmatter Integrity RFC
 
 This RFC defines the plan to stop YAML frontmatter corruption, prevent repeat
-amplification, and move YAOS toward a structure-aware frontmatter sync model.
+amplification, and move Lodestone toward a structure-aware frontmatter sync model.
 
 It is intentionally grounded in the 2026-04-09 incident logs:
 
@@ -9,7 +9,7 @@ It is intentionally grounded in the 2026-04-09 incident logs:
 - the first visible corruption was concentrated in YAML frontmatter
 - the duplicate growth involved task-related properties such as
   `complete_instances`, `taskSourceType`, and `timeEstimate`
-- a later recovery loop in YAOS demonstrably amplified the malformed state
+- a later recovery loop in Lodestone demonstrably amplified the malformed state
 
 ## Status
 
@@ -35,7 +35,7 @@ Still proposed:
 
 ## Why this RFC exists
 
-YAOS currently treats a Markdown file as a single `Y.Text`.
+Lodestone currently treats a Markdown file as a single `Y.Text`.
 
 That is correct for prose and code-like note bodies, but YAML frontmatter has a
 different semantic shape:
@@ -49,21 +49,21 @@ different semantic shape:
 The incident showed two distinct failure modes:
 
 1. A malformed frontmatter state entered the CRDT from a remote path.
-2. YAOS later amplified a small disk/editor/CRDT divergence by applying disk
+2. Lodestone later amplified a small disk/editor/CRDT divergence by applying disk
    content to the CRDT and then immediately applying editor content back again.
 
 The second failure mode is ours and should be fixed immediately.
 
 The first failure mode may have been triggered by another plugin or another
-device. YAOS cannot reliably attribute an Obsidian `modify` event to TaskNotes,
-TaskForge, Obsidian Properties, mobile Obsidian, or a user keystroke. YAOS can,
+device. Lodestone cannot reliably attribute an Obsidian `modify` event to TaskNotes,
+TaskForge, Obsidian Properties, mobile Obsidian, or a user keystroke. Lodestone can,
 however, detect frontmatter danger by structure and stop propagating obviously
 bad states.
 
 ## Goals
 
 - Stop the verified recovery amplifier.
-- Prevent YAOS from writing or propagating newly detected malformed YAML
+- Prevent Lodestone from writing or propagating newly detected malformed YAML
   frontmatter.
 - Preserve real-time body sync and cursor behavior.
 - Treat external frontmatter writers as normal, supported inputs.
@@ -109,7 +109,7 @@ The body can remain CRDT text. Frontmatter needs structure-aware validation at a
 minimum, and structure-aware synchronization as the longer-term target.
 
 This is not because YAML is special in a theoretical sense. It is because users
-and plugins treat frontmatter as a map of properties, while YAOS currently
+and plugins treat frontmatter as a map of properties, while Lodestone currently
 syncs the serialized bytes.
 
 ### Plugin attribution is the wrong abstraction
@@ -124,14 +124,14 @@ The correct boundary is:
 - prevent known-bad transitions from becoming authoritative
 - expose enough diagnostics to identify the source later when possible
 
-This keeps YAOS compatible with all frontmatter-writing plugins instead of
+This keeps Lodestone compatible with all frontmatter-writing plugins instead of
 playing whack-a-mole with individual integrations.
 
 ### A suspicious frontmatter change should fail safe
 
 If a local or remote update would introduce duplicate YAML keys, repeated key
 bursts, malformed frontmatter delimiters, or pathological growth isolated to
-frontmatter, YAOS should avoid making that state authoritative automatically.
+frontmatter, Lodestone should avoid making that state authoritative automatically.
 
 Depending on phase and confidence, the action can be:
 
@@ -191,7 +191,7 @@ MarkdownText
   -> put:  { frontmatterValue, bodyText } -> MarkdownText
 ```
 
-YAOS should stop treating YAML serialization as the source of truth for
+Lodestone should stop treating YAML serialization as the source of truth for
 properties. Instead, it should parse YAML into a value, merge that value under
 property invariants, and print it back to canonical YAML.
 
@@ -322,7 +322,7 @@ When a local disk modify is ingested:
 - if frontmatter validates as `warn`, proceed but trace
 - if frontmatter validates as `block`, do not apply it to the CRDT
 
-For `block`, YAOS should:
+For `block`, Lodestone should:
 
 - leave body sync available when the body can be separated safely
 - record a diagnostic
@@ -363,7 +363,7 @@ The quarantine should be clearable when:
 The first implementation is skip behavior plus trace/log diagnostics, a
 throttled notice, a global opt-out, and bounded persisted quarantine metadata
 for debugging. Explicit accept/keep recovery controls should follow only if they
-remain consistent with YAOS snapshot and Obsidian File Recovery policy.
+remain consistent with Lodestone snapshot and Obsidian File Recovery policy.
 
 ## P2: Structure-aware frontmatter sync
 
@@ -440,7 +440,7 @@ This avoids a risky all-at-once CRDT schema change.
 Copy should be short and non-technical:
 
 ```text
-YAOS paused a properties update in "Bathroom floor clean.md" because it looked malformed.
+Lodestone paused a properties update in "Bathroom floor clean.md" because it looked malformed.
 Your note body is still syncing.
 ```
 
@@ -489,7 +489,7 @@ P0 is complete when:
 
 P1 is complete when:
 
-- YAOS can detect and block obvious duplicate frontmatter states in both
+- Lodestone can detect and block obvious duplicate frontmatter states in both
   disk-to-CRDT and CRDT-to-disk directions
 - body sync continues when a frontmatter update is quarantined and the body can
   be separated safely
@@ -525,5 +525,5 @@ P2 is complete when:
 7. Add user-facing conflict notice.
 8. Design and implement structured frontmatter sidecar.
 
-This order fixes the known YAOS bug first, then adds guardrails against other
+This order fixes the known Lodestone bug first, then adds guardrails against other
 plugins and devices, then moves toward the deeper abstraction.

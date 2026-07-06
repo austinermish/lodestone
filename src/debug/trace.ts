@@ -102,7 +102,7 @@ export class PersistentTraceLogger {
 			vaultId: options.vaultId,
 		};
 		this.rootDir = normalizePath(
-			`${this.app.vault.configDir}/plugins/yaos/logs`,
+			`${this.app.vault.configDir}/plugins/lodestone/logs`,
 		);
 	}
 

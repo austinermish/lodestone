@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-YAOS is a self-hosted, zero-terminal Obsidian sync plugin backed by a Cloudflare Worker. It uses Yjs CRDTs to eliminate merge conflicts across devices. The repo contains two deployable units:
+Lodestone is a self-hosted, zero-terminal Obsidian sync plugin backed by a Cloudflare Worker. It uses Yjs CRDTs to eliminate merge conflicts across devices. The repo contains two deployable units:
 
 - **Plugin** (`src/`) — TypeScript compiled to `main.js` and loaded by Obsidian
 - **Server** (`server/`) — Cloudflare Worker with Durable Objects, deployed via Wrangler
@@ -71,16 +71,16 @@ After pushing, build the artifacts, write release notes to a temp file, create t
 npm run build
 
 # Write release notes to temp file, create release, then clean up
-cat > /tmp/yaos-X.Y.Z-notes.md << 'EOF'
+cat > /tmp/lodestone-X.Y.Z-notes.md << 'EOF'
 <release notes here>
 EOF
 
 gh release create X.Y.Z \
   --title "X.Y.Z — <short description>" \
-  --notes-file /tmp/yaos-X.Y.Z-notes.md \
+  --notes-file /tmp/lodestone-X.Y.Z-notes.md \
   main.js manifest.json styles.css
 
-sudo rm /tmp/yaos-X.Y.Z-notes.md
+sudo rm /tmp/lodestone-X.Y.Z-notes.md
 ```
 
 Note: plain `rm` works on `/tmp` files — do **not** use `sudo rm`.
@@ -124,7 +124,7 @@ One `Y.Doc` per vault ("monolithic vault CRDT"). All file contents are sub-docum
 - R2 used for blob storage and snapshot archives
 - Auth: setup token (one-time claim via browser UI) or `SYNC_TOKEN` env var
 - `setupPage.ts` renders the browser claim UI; deep-links back via `obsidian://` protocol
-- `hubRegistry.ts` (`HubRegistry` DO, `YAOS_HUB` binding) — stores spoke registrations per hub vault
+- `hubRegistry.ts` (`HubRegistry` DO, `LODESTONE_HUB` binding) — stores spoke registrations per hub vault
 - `syncBridge.ts` — DO-to-DO propagation functions for hub→spoke and spoke→hub cross-vault sync
 
 ### Data flow
@@ -147,9 +147,9 @@ Obsidian file event
 - Mobile compatibility is required (`isDesktopOnly: false`) — avoid Node/Electron APIs in plugin code
 - Use `this.registerEvent`, `this.registerDomEvent`, `this.registerInterval` for all listeners so they're cleaned up on unload
 
-## yaos.md — one-page documentation
+## lodestone.md — one-page documentation
 
-`yaos.md` is the canonical single-page reference for YAOS. Keep it up to date as the plugin evolves. Add entries for:
+`lodestone.md` is the canonical single-page reference for Lodestone. Keep it up to date as the plugin evolves. Add entries for:
 
 - New terminology or redefined terms (e.g., when "host" vs "hub" distinction was formalized)
 - New sync modes or topology changes

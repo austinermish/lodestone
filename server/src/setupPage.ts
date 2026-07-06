@@ -39,17 +39,17 @@ function normalizeDeployRepo(value: string | undefined): string {
 export function renderSetupPage(options: SetupPageOptions): string {
 	const safeHost = escapeHtml(options.host);
 	const deployRepo = normalizeDeployRepo(options.deployRepo);
-	const releaseZipUrl = `https://github.com/${deployRepo}/releases/latest/download/yaos.zip`;
+	const releaseZipUrl = `https://github.com/${deployRepo}/releases/latest/download/lodestone.zip`;
 
 	// Cleaned up the installation copy slightly for better reading
 	const installationStep = IS_MARKETPLACE_APPROVED
 		? `<div class="step-text">
-              In Obsidian, open <em>Settings → Community plugins</em>, search for <strong>YAOS</strong>, install it, and make sure it is <strong>enabled</strong>.
+              In Obsidian, open <em>Settings → Community plugins</em>, search for <strong>Lodestone</strong>, install it, and make sure it is <strong>enabled</strong>.
            </div>`
 		: `<div class="step-text">
               <ol>
                 <li>After opening BRAT, select <em>Add beta plugin</em> and paste <code>${deployRepo}</code>.</li>
-                <li>Return to Community plugins and make sure <strong>YAOS</strong> is installed and <strong>enabled</strong>.</li>
+                <li>Return to Community plugins and make sure <strong>Lodestone</strong> is installed and <strong>enabled</strong>.</li>
               </ol>
               <p class="micro-text">Prefer manual installation? <a href="${releaseZipUrl}">Download the zip</a>.</p>
            </div>`;
@@ -59,7 +59,7 @@ export function renderSetupPage(options: SetupPageOptions): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Claim YAOS Server</title>
+  <title>Claim Lodestone Server</title>
   <style>
     :root { color-scheme: dark; }
     body {
@@ -335,7 +335,7 @@ export function renderSetupPage(options: SetupPageOptions): string {
       <div class="flow-step">
         <div class="step-header">
           <div class="step-number">1</div>
-          <h2>Get the YAOS plugin</h2>
+          <h2>Get the Lodestone plugin</h2>
         </div>
         ${installationStep}
         <div class="step-recovery">
@@ -344,7 +344,7 @@ export function renderSetupPage(options: SetupPageOptions): string {
         </div>
         <label class="checkbox-wrapper">
           <input id="installed" type="checkbox" />
-          <span>I have installed and <strong>enabled</strong> YAOS.</span>
+          <span>I have installed and <strong>enabled</strong> Lodestone.</span>
         </label>
       </div>
 
@@ -361,7 +361,7 @@ export function renderSetupPage(options: SetupPageOptions): string {
           </div>
           <div class="action-box">
             <p>On a mobile device</p>
-            <div id="qr" aria-label="YAOS mobile setup QR"></div>
+            <div id="qr" aria-label="Lodestone mobile setup QR"></div>
           </div>
         </div>
 
@@ -523,7 +523,7 @@ export function renderSetupPage(options: SetupPageOptions): string {
 	        vaultInput.value = vaultId;
 
 	        // Deep link for local button
-	        const deepLink = "obsidian://yaos?" + new URLSearchParams({ action: "setup", host: window.location.origin, token: token, vaultId: vaultId }).toString();
+	        const deepLink = "obsidian://lodestone?" + new URLSearchParams({ action: "setup", host: window.location.origin, token: token, vaultId: vaultId }).toString();
 	        openBtn.href = deepLink;
 
 	        // QR Code pointing to the trampoline page
@@ -551,7 +551,7 @@ export function renderMobileSetupPage(options: MobileSetupPageOptions): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Connect YAOS</title>
+  <title>Connect Lodestone</title>
   <style>
     :root { color-scheme: dark; }
     body {
@@ -630,16 +630,16 @@ export function renderMobileSetupPage(options: MobileSetupPageOptions): string {
 </head>
 <body>
   <main class="card">
-    <h1>Connect YAOS</h1>
+    <h1>Connect Lodestone</h1>
     <p>Link this phone to <strong>${safeHost}</strong> in two steps.</p>
 
     <a id="connect-button" class="cta" href="#" aria-disabled="true">Connect Obsidian</a>
     <div id="status" class="status">Loading setup data...</div>
     <div class="recovery">
-      <p>Don't have YAOS installed on this phone yet?</p>
+      <p>Don't have Lodestone installed on this phone yet?</p>
       <p style="margin-top: 6px;">1. Open BRAT in Obsidian.</p>
       <p style="margin-top: 4px;">2. Add repo <code style="font-size:12px;">${deployRepo}</code>.</p>
-      <p style="margin-top: 4px; margin-bottom: 10px;">3. Enable YAOS, then come back and tap <strong>Connect Obsidian</strong>.</p>
+      <p style="margin-top: 4px; margin-bottom: 10px;">3. Enable Lodestone, then come back and tap <strong>Connect Obsidian</strong>.</p>
       <div class="row">
         <a class="ghost" href="obsidian://show-plugin?id=obsidian42-brat">Open BRAT</a>
         <button id="copy-repo" class="ghost" type="button">Copy repo slug</button>
@@ -655,7 +655,7 @@ export function renderMobileSetupPage(options: MobileSetupPageOptions): string {
 	        <input id="token-input" readonly />
 	        <label>Vault ID</label>
 	        <input id="vault-input" readonly />
-	        <p style="font-size: 11px; margin: 0; color: #6984a3;">Copy these to YAOS settings if the button fails.</p>
+	        <p style="font-size: 11px; margin: 0; color: #6984a3;">Copy these to Lodestone settings if the button fails.</p>
 	      </div>
 	    </details>
   </main>
@@ -689,14 +689,14 @@ export function renderMobileSetupPage(options: MobileSetupPageOptions): string {
 	      tokenInput.value = token;
 	      vaultInput.value = vaultId;
 
-	      const deepLink = "obsidian://yaos?" + new URLSearchParams({ action: "setup", host, token, vaultId }).toString();
+	      const deepLink = "obsidian://lodestone?" + new URLSearchParams({ action: "setup", host, token, vaultId }).toString();
 	      connectBtn.href = deepLink;
 	      connectBtn.removeAttribute("aria-disabled");
 
       // Scrub the URL history to hide the token fragment immediately
       window.history.replaceState(null, "", window.location.pathname);
 
-      statusEl.textContent = "Ready. Install YAOS via BRAT if needed, then tap Connect Obsidian.";
+      statusEl.textContent = "Ready. Install Lodestone via BRAT if needed, then tap Connect Obsidian.";
     }
 
     copyRepoBtn.addEventListener("click", async () => {
@@ -723,7 +723,7 @@ export function renderRunningPage(options: RunningPageOptions): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>YAOS Server Running</title>
+  <title>Lodestone Server Running</title>
   <style>
     body {
       margin: 0; font-family: ui-sans-serif, system-ui, sans-serif;
@@ -750,7 +750,7 @@ export function renderRunningPage(options: RunningPageOptions): string {
 </head>
 <body>
   <main class="card">
-    <h1><span class="pulse-dot"></span>YAOS Server is Online</h1>
+    <h1><span class="pulse-dot"></span>Lodestone Server is Online</h1>
     <p>${authLabel}</p>
     <div class="features">
       <div class="badge active">Text Sync</div>

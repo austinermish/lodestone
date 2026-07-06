@@ -680,7 +680,7 @@ export class EditorBindingManager {
 			10000,
 		);
 		console.error(
-			"[yaos] Critical: Could not locate CodeMirror 6 EditorView. Live binding disabled.",
+			"[lodestone] Critical: Could not locate CodeMirror 6 EditorView. Live binding disabled.",
 		);
 	}
 
@@ -1042,7 +1042,7 @@ export class EditorBindingManager {
 	private log(msg: string): void {
 		this.trace?.("editor", msg);
 		if (this.debug) {
-			console.debug(`[yaos:editor] ${msg}`);
+			console.debug(`[lodestone:editor] ${msg}`);
 		}
 	}
 

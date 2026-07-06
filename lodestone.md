@@ -1,4 +1,4 @@
-# YAOS Documentation
+# Lodestone Documentation
 
 ## Definitions
 
@@ -24,7 +24,7 @@
 ## Invite URL format
 
 ```
-obsidian://yaos?action=spoke&host=HOST_URL&hubVaultId=VAULT_ID&token=TOKEN
+obsidian://lodestone?action=spoke&host=HOST_URL&hubVaultId=VAULT_ID&token=TOKEN
 ```
 
 - `host` and `token` are only applied if the receiving vault has no server connection yet (bootstrap case). If already connected to the same host, the existing connection is reused.

@@ -1,13 +1,13 @@
 # Warts and limits
 
-This is the canonical limits and tradeoffs document for the current YAOS architecture.
+This is the canonical limits and tradeoffs document for the current Lodestone architecture.
 It is intentionally fact-first: hard constraints, current implementation truth, and explicit engineering warts.
 
-Maintaining one vault-level `Y.Doc` gives strong cross-file transactional behavior, but it also means persistence must handle a large binary state graph on infrastructure with strict per-entry limits. YAOS addresses this with a checkpoint + journal storage engine rather than single-value rewrites.
+Maintaining one vault-level `Y.Doc` gives strong cross-file transactional behavior, but it also means persistence must handle a large binary state graph on infrastructure with strict per-entry limits. Lodestone addresses this with a checkpoint + journal storage engine rather than single-value rewrites.
 
 ## Current server persistence model
 
-YAOS keeps a monolithic vault-level `Y.Doc` in memory, but persistence is no longer a single-value rewrite:
+Lodestone keeps a monolithic vault-level `Y.Doc` in memory, but persistence is no longer a single-value rewrite:
 
 - Checkpoint layer: full-state snapshots chunked into 512 KiB segments.
 - Journal layer: coalesced state-vector deltas appended at `onSave()` cadence.
@@ -47,7 +47,7 @@ In practice, compute and memory behavior usually become the first bottlenecks be
 
 ### Observability is bounded and fail-open by design
 
-YAOS originally kept room traces in one growing storage value. Real production
+Lodestone originally kept room traces in one growing storage value. Real production
 logs showed that this could trigger `SQLITE_TOOBIG` and take the room down.
 
 The current design stores traces as bounded per-entry records and treats trace
@@ -74,7 +74,7 @@ Fallback to full-document probing remains for legacy/missing metadata cases.
 
 ### CRDT tombstones are retained
 
-In YAOS, markdown tombstones (records of deleted files) are intentionally retained in the CRDT graph.
+In Lodestone, markdown tombstones (records of deleted files) are intentionally retained in the CRDT graph.
 
 Reason: without tombstones, stale offline clients can reintroduce deleted files during reconnect, causing resurrection bugs.
 
@@ -86,13 +86,13 @@ The plugin persists multiple state domains into Obsidian `data.json` (settings, 
 
 Obsidian persistence requires a read/merge/write cycle. If independent async saves race, they can clobber each other.
 
-YAOS routes these writes through a single serialized persistence chain to prevent cross-feature state stomps. This is less "clean" than isolated save paths, but materially safer.
+Lodestone routes these writes through a single serialized persistence chain to prevent cross-feature state stomps. This is less "clean" than isolated save paths, but materially safer.
 
 ### IndexedDB readiness check uses private internals
 
 Local-first behavior depends on `y-indexeddb` startup succeeding. IndexedDB implementations are known to be flaky in some mobile/webview conditions.
 
-YAOS currently reads a private `y-indexeddb` internal (`_db`) to detect startup failure reliably and fail safely instead of continuing in a potentially corrupt state.
+Lodestone currently reads a private `y-indexeddb` internal (`_db`) to detect startup failure reliably and fail safely instead of continuing in a potentially corrupt state.
 
 This is a contained hack, explicitly documented, and should be replaced if upstream offers a stable public readiness/failure API.
 

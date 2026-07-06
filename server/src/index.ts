@@ -28,16 +28,16 @@ const EXISTS_BATCH_LIMIT = 50;
 const R2_HEAD_CONCURRENCY = 4;
 const CORS_ALLOW_HEADERS = "Authorization, Content-Type";
 const CORS_ALLOW_METHODS = "GET, POST, PUT, OPTIONS";
-const CORS_EXPOSE_HEADERS = "X-YAOS-Snapshot-Day";
-const LOG_PREFIX = "[yaos-sync:worker]";
+const CORS_EXPOSE_HEADERS = "X-Lodestone-Snapshot-Day";
+const LOG_PREFIX = "[lodestone-sync:worker]";
 
 interface Env {
 	SYNC_TOKEN?: string;
-	YAOS_CANONICAL_REPO?: string;
-	YAOS_SYNC: DurableObjectNamespace<VaultSyncServer>;
-	YAOS_CONFIG: DurableObjectNamespace;
-	YAOS_HUB: DurableObjectNamespace;
-	YAOS_BUCKET?: R2Bucket;
+	LODESTONE_CANONICAL_REPO?: string;
+	LODESTONE_SYNC: DurableObjectNamespace<VaultSyncServer>;
+	LODESTONE_CONFIG: DurableObjectNamespace;
+	LODESTONE_HUB: DurableObjectNamespace;
+	LODESTONE_BUCKET?: R2Bucket;
 }
 
 type AuthState =
@@ -191,19 +191,19 @@ async function hashToken(token: string): Promise<string> {
 }
 
 function supportsBuckets(env: Env): boolean {
-	return env.YAOS_BUCKET !== undefined;
+	return env.LODESTONE_BUCKET !== undefined;
 }
 
 function canonicalRepoForSetup(env: Env): string | undefined {
-	const raw = env.YAOS_CANONICAL_REPO?.trim();
+	const raw = env.LODESTONE_CANONICAL_REPO?.trim();
 	if (!raw) return undefined;
 	return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(raw) ? raw : undefined;
 }
 
 async function getStoredServerConfig(env: Env): Promise<StoredServerConfig> {
-	const id = env.YAOS_CONFIG.idFromName("global-config");
-	const stub = env.YAOS_CONFIG.get(id);
-	const res = await stub.fetch("https://internal/__yaos/config");
+	const id = env.LODESTONE_CONFIG.idFromName("global-config");
+	const stub = env.LODESTONE_CONFIG.get(id);
+	const res = await stub.fetch("https://internal/__lodestone/config");
 	if (!res.ok) {
 		throw new Error(`config fetch failed (${res.status})`);
 	}
@@ -211,9 +211,9 @@ async function getStoredServerConfig(env: Env): Promise<StoredServerConfig> {
 }
 
 async function claimServerConfig(env: Env, tokenHash: string): Promise<boolean> {
-	const id = env.YAOS_CONFIG.idFromName("global-config");
-	const stub = env.YAOS_CONFIG.get(id);
-	const res = await stub.fetch("https://internal/__yaos/claim", {
+	const id = env.LODESTONE_CONFIG.idFromName("global-config");
+	const stub = env.LODESTONE_CONFIG.get(id);
+	const res = await stub.fetch("https://internal/__lodestone/claim", {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
@@ -228,9 +228,9 @@ async function setServerUpdateMetadata(env: Env, metadata: {
 	updateRepoUrl?: unknown;
 	updateRepoBranch?: unknown;
 }): Promise<StoredServerConfig> {
-	const id = env.YAOS_CONFIG.idFromName("global-config");
-	const stub = env.YAOS_CONFIG.get(id);
-	const res = await stub.fetch("https://internal/__yaos/update-metadata", {
+	const id = env.LODESTONE_CONFIG.idFromName("global-config");
+	const stub = env.LODESTONE_CONFIG.get(id);
+	const res = await stub.fetch("https://internal/__lodestone/update-metadata", {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
@@ -285,7 +285,7 @@ function buildObsidianSetupUrl(host: string, token: string, vaultId?: string): s
 	if (vaultId) {
 		params.set("vaultId", vaultId);
 	}
-	return `obsidian://yaos?${params.toString()}`;
+	return `obsidian://lodestone?${params.toString()}`;
 }
 
 function getCapabilities(auth: AuthState, env: Env, config: StoredServerConfig | null = null): {
@@ -328,8 +328,8 @@ async function recordVaultTrace(
 	data: Record<string, unknown> = {},
 ): Promise<void> {
 	try {
-		const stub = await getServerByName(env.YAOS_SYNC, vaultId);
-		await stub.fetch("https://internal/__yaos/trace", {
+		const stub = await getServerByName(env.LODESTONE_SYNC, vaultId);
+		await stub.fetch("https://internal/__lodestone/trace", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -342,8 +342,8 @@ async function recordVaultTrace(
 }
 
 async function fetchVaultDocument(env: Env, vaultId: string): Promise<Uint8Array> {
-	const stub = await getServerByName(env.YAOS_SYNC, vaultId);
-	const res = await stub.fetch("https://internal/__yaos/document");
+	const stub = await getServerByName(env.LODESTONE_SYNC, vaultId);
+	const res = await stub.fetch("https://internal/__lodestone/document");
 	if (!res.ok) {
 		throw new Error(`document fetch failed (${res.status})`);
 	}
@@ -353,8 +353,8 @@ async function fetchVaultDocument(env: Env, vaultId: string): Promise<Uint8Array
 async function fetchVaultRoomMeta(env: Env, vaultId: string): Promise<{
 	schemaVersion: number | null;
 } | null> {
-	const stub = await getServerByName(env.YAOS_SYNC, vaultId);
-	const res = await stub.fetch("https://internal/__yaos/meta");
+	const stub = await getServerByName(env.LODESTONE_SYNC, vaultId);
+	const res = await stub.fetch("https://internal/__lodestone/meta");
 	if (!res.ok) {
 		throw new Error(`room meta fetch failed (${res.status})`);
 	}
@@ -396,8 +396,8 @@ async function fetchVaultSchemaVersion(env: Env, vaultId: string): Promise<numbe
 }
 
 async function fetchVaultDebug(env: Env, vaultId: string): Promise<Response> {
-	const stub = await getServerByName(env.YAOS_SYNC, vaultId);
-	return await stub.fetch("https://internal/__yaos/debug");
+	const stub = await getServerByName(env.LODESTONE_SYNC, vaultId);
+	return await stub.fetch("https://internal/__lodestone/debug");
 }
 
 async function handleBlobExists(
@@ -405,7 +405,7 @@ async function handleBlobExists(
 	vaultId: string,
 	req: Request,
 ): Promise<Response> {
-	const bucket = env.YAOS_BUCKET;
+	const bucket = env.LODESTONE_BUCKET;
 	if (!bucket) {
 		return json({ error: "attachments_unavailable" }, 503);
 	}
@@ -445,7 +445,7 @@ async function handleBlobUpload(
 	hash: string,
 	req: Request,
 ): Promise<Response> {
-	if (!env.YAOS_BUCKET) {
+	if (!env.LODESTONE_BUCKET) {
 		return json({ error: "attachments_unavailable" }, 503);
 	}
 
@@ -468,7 +468,7 @@ async function handleBlobUpload(
 		return json({ error: "hash mismatch: uploaded content does not match URL hash" }, 400);
 	}
 
-	await env.YAOS_BUCKET.put(
+	await env.LODESTONE_BUCKET.put(
 		blobKey(vaultId, hash),
 		body,
 		{
@@ -486,7 +486,7 @@ async function handleBlobDownload(
 	vaultId: string,
 	hash: string,
 ): Promise<Response> {
-	if (!env.YAOS_BUCKET) {
+	if (!env.LODESTONE_BUCKET) {
 		return json({ error: "attachments_unavailable" }, 503);
 	}
 
@@ -494,7 +494,7 @@ async function handleBlobDownload(
 		return json({ error: "invalid hash: must be 64 hex chars (SHA-256)" }, 400);
 	}
 
-	const object = await env.YAOS_BUCKET.get(blobKey(vaultId, hash));
+	const object = await env.LODESTONE_BUCKET.get(blobKey(vaultId, hash));
 	if (!object) {
 		return json({ error: "not found" }, 404);
 	}
@@ -512,14 +512,14 @@ async function handleBlobDownload(
 }
 
 function getHubRegistryStub(env: Env, hubVaultId: string): DurableObjectStub {
-	const id = env.YAOS_HUB.idFromName(hubVaultId);
-	return env.YAOS_HUB.get(id);
+	const id = env.LODESTONE_HUB.idFromName(hubVaultId);
+	return env.LODESTONE_HUB.get(id);
 }
 
 async function listHubSpokes(env: Env, hubVaultId: string): Promise<SpokeEntry[]> {
 	try {
 		const stub = getHubRegistryStub(env, hubVaultId);
-		const res = await stub.fetch("https://internal/__yaos/hub/spokes");
+		const res = await stub.fetch("https://internal/__lodestone/hub/spokes");
 		if (!res.ok) return [];
 		const payload: { spokes?: SpokeEntry[] } = await res.json();
 		return Array.isArray(payload.spokes) ? payload.spokes : [];
@@ -535,8 +535,8 @@ async function setVaultMode(
 	hubVaultId?: string,
 ): Promise<void> {
 	try {
-		const stub = await getServerByName(env.YAOS_SYNC, vaultId);
-		await stub.fetch("https://internal/__yaos/set-mode", {
+		const stub = await getServerByName(env.LODESTONE_SYNC, vaultId);
+		await stub.fetch("https://internal/__lodestone/set-mode", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ mode, hubVaultId }),
@@ -568,7 +568,7 @@ async function handleHubSpokeRegister(
 
 	// Register in HubRegistry
 	const hubStub = getHubRegistryStub(env, hubVaultId);
-	const regRes = await hubStub.fetch("https://internal/__yaos/hub/spokes", {
+	const regRes = await hubStub.fetch("https://internal/__lodestone/hub/spokes", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ spokeVaultId, deviceName, hubVaultId }),
@@ -592,8 +592,8 @@ async function handleHubSpokeRegister(
 				String.fromCharCode(...hubDocBytes),
 			);
 			// Push hub state to spoke's DO so it's ready before the client connects.
-			const spokeStub = await getServerByName(env.YAOS_SYNC, spokeVaultId);
-			await spokeStub.fetch("https://internal/__yaos/apply-hub-update", {
+			const spokeStub = await getServerByName(env.LODESTONE_SYNC, spokeVaultId);
+			await spokeStub.fetch("https://internal/__lodestone/apply-hub-update", {
 				method: "POST",
 				headers: { "Content-Type": "application/octet-stream" },
 				body: hubDocBytes,
@@ -611,7 +611,7 @@ async function createSnapshotFromLiveDoc(
 	vaultId: string,
 	triggeredBy?: string,
 ): Promise<SnapshotResult> {
-	if (!env.YAOS_BUCKET) {
+	if (!env.LODESTONE_BUCKET) {
 		return {
 			status: "unavailable",
 			reason: "R2 bucket not configured",
@@ -624,7 +624,7 @@ async function createSnapshotFromLiveDoc(
 		Y.applyUpdate(doc, update);
 	}
 
-	const index = await createSnapshot(doc, vaultId, env.YAOS_BUCKET, triggeredBy);
+	const index = await createSnapshot(doc, vaultId, env.LODESTONE_BUCKET, triggeredBy);
 	return {
 		status: "created",
 		snapshotId: index.snapshotId,
@@ -832,7 +832,7 @@ const worker = {
 				roomSchemaVersion,
 			});
 
-			const stub = await getServerByName(env.YAOS_SYNC, syncRoute.vaultId);
+			const stub = await getServerByName(env.LODESTONE_SYNC, syncRoute.vaultId);
 			return await stub.fetch(req);
 		}
 
@@ -869,7 +869,7 @@ const worker = {
 				if (req.method === "DELETE") {
 					const hubStub = getHubRegistryStub(env, hubVaultId);
 					await hubStub.fetch(
-						`https://internal/__yaos/hub/spokes/${encodeURIComponent(spokeVaultId)}`,
+						`https://internal/__lodestone/hub/spokes/${encodeURIComponent(spokeVaultId)}`,
 						{ method: "DELETE" },
 					);
 					// Reset the spoke vault's mode to standalone
@@ -989,8 +989,8 @@ const worker = {
 					body = {};
 				}
 
-				const stub = await getServerByName(env.YAOS_SYNC, vaultRoute.vaultId);
-				const res = await stub.fetch("https://internal/__yaos/snapshot-maybe", {
+				const stub = await getServerByName(env.LODESTONE_SYNC, vaultRoute.vaultId);
+				const res = await stub.fetch("https://internal/__lodestone/snapshot-maybe", {
 					method: "POST",
 					headers: {
 						"Content-Type": "application/json",
@@ -1007,16 +1007,16 @@ const worker = {
 			}
 
 			if (req.method === "GET" && rest.length === 0) {
-				if (!env.YAOS_BUCKET) {
+				if (!env.LODESTONE_BUCKET) {
 					return withCors(json({ error: "snapshots_unavailable" }, 503));
 				}
 
-				const snapshots = await listSnapshots(vaultRoute.vaultId, env.YAOS_BUCKET);
+				const snapshots = await listSnapshots(vaultRoute.vaultId, env.LODESTONE_BUCKET);
 				return withCors(json({ snapshots }));
 			}
 
 			if (req.method === "GET" && rest.length === 1) {
-				if (!env.YAOS_BUCKET) {
+				if (!env.LODESTONE_BUCKET) {
 					return withCors(json({ error: "snapshots_unavailable" }, 503));
 				}
 
@@ -1027,7 +1027,7 @@ const worker = {
 				const result = await getSnapshotPayload(
 					vaultRoute.vaultId,
 					snapshotId,
-					env.YAOS_BUCKET,
+					env.LODESTONE_BUCKET,
 				);
 				if (!result) {
 					return withCors(json({ error: "not found" }, 404));
@@ -1037,7 +1037,7 @@ const worker = {
 					headers: {
 						"Content-Type": "application/gzip",
 						"Cache-Control": "no-store",
-						"X-YAOS-Snapshot-Day": result.index.day,
+						"X-Lodestone-Snapshot-Day": result.index.day,
 					},
 				}));
 			}

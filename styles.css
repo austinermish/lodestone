@@ -11,7 +11,7 @@
  * Settings tab and modal layout
  */
 
-.yaos-settings-card-row {
+.lodestone-settings-card-row {
 	display: flex;
 	justify-content: space-between;
 	gap: 12px;
@@ -19,35 +19,35 @@
 	border-top: 1px solid var(--background-modifier-border);
 }
 
-.yaos-settings-card-label {
+.lodestone-settings-card-label {
 	color: var(--text-muted);
 }
 
-.yaos-settings-card-value {
+.lodestone-settings-card-value {
 	font-weight: 600;
 	text-align: right;
 	word-break: break-word;
 }
 
-.yaos-settings-details {
+.lodestone-settings-details {
 	margin-bottom: 16px;
 }
 
-.yaos-settings-details-summary {
+.lodestone-settings-details-summary {
 	cursor: pointer;
 	font-weight: 600;
 	margin-bottom: 8px;
 }
 
-.yaos-settings-details-body {
+.lodestone-settings-details-body {
 	margin-top: 8px;
 }
 
-.yaos-modal-copy {
+.lodestone-modal-copy {
 	margin-bottom: 12px;
 }
 
-.yaos-pair-device-qr-wrap {
+.lodestone-pair-device-qr-wrap {
 	display: flex;
 	justify-content: center;
 	align-items: center;
@@ -59,35 +59,35 @@
 	min-height: 240px;
 }
 
-.yaos-pair-device-loading {
+.lodestone-pair-device-loading {
 	color: var(--text-muted);
 }
 
-.yaos-pair-device-qr-canvas {
+.lodestone-pair-device-qr-canvas {
 	display: block;
 	max-width: 100%;
 	height: auto;
 }
 
-.yaos-settings-modal-textarea {
+.lodestone-settings-modal-textarea {
 	width: 100%;
 	margin-bottom: 8px;
 	box-sizing: border-box;
 }
 
-.yaos-settings-callout {
+.lodestone-settings-callout {
 	margin-bottom: 12px;
 }
 
-.yaos-settings-setup-callout {
+.lodestone-settings-setup-callout {
 	margin-bottom: 16px;
 }
 
-.yaos-settings-setup-hint {
+.lodestone-settings-setup-hint {
 	margin-top: -4px;
 }
 
-.yaos-settings-status-card {
+.lodestone-settings-status-card {
 	margin-bottom: 16px;
 	padding: 14px 16px;
 	border: 1px solid var(--background-modifier-border);
@@ -95,59 +95,59 @@
 	background: var(--background-secondary);
 }
 
-.yaos-settings-status-line {
+.lodestone-settings-status-line {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
 	gap: 12px;
 }
 
-.yaos-settings-status-copy {
+.lodestone-settings-status-copy {
 	min-width: 0;
 }
 
-.yaos-settings-status-title {
+.lodestone-settings-status-title {
 	font-weight: 700;
 }
 
-.yaos-settings-status-subtitle {
+.lodestone-settings-status-subtitle {
 	color: var(--text-muted);
 	font-size: 12px;
 	margin-top: 2px;
 }
 
-.yaos-settings-status-badge {
+.lodestone-settings-status-badge {
 	font-weight: 700;
 	white-space: nowrap;
 }
 
-.yaos-settings-status-badge.is-connected {
+.lodestone-settings-status-badge.is-connected {
 	color: var(--color-green);
 }
 
-.yaos-settings-status-badge.is-busy {
+.lodestone-settings-status-badge.is-busy {
 	color: var(--color-orange);
 }
 
-.yaos-settings-status-badge.is-error {
+.lodestone-settings-status-badge.is-error {
 	color: var(--text-error);
 }
 
-.yaos-settings-status-badge.is-idle {
+.lodestone-settings-status-badge.is-idle {
 	color: var(--text-muted);
 }
 
-.yaos-settings-status-actions {
+.lodestone-settings-status-actions {
 	margin-top: 12px;
 }
 
-.yaos-settings-attachment-note {
+.lodestone-settings-attachment-note {
 	color: var(--text-muted);
 	font-size: 12px;
 	margin-top: -8px;
 }
 
-.yaos-settings-security-warning {
+.lodestone-settings-security-warning {
 	color: var(--text-error);
 	font-size: 12px;
 	margin-top: -8px;

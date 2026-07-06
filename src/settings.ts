@@ -131,9 +131,9 @@ function addSectionHeading(containerEl: HTMLElement, title: string): void {
 }
 
 function addCardRow(containerEl: HTMLElement, label: string, value: string): void {
-	const row = containerEl.createDiv({ cls: "yaos-settings-card-row" });
-	row.createSpan({ text: label, cls: "yaos-settings-card-label" });
-	row.createSpan({ text: value, cls: "yaos-settings-card-value" });
+	const row = containerEl.createDiv({ cls: "lodestone-settings-card-row" });
+	row.createSpan({ text: label, cls: "lodestone-settings-card-label" });
+	row.createSpan({ text: value, cls: "lodestone-settings-card-value" });
 }
 
 function statusClass(state: string): string {
@@ -171,11 +171,11 @@ function confirmAction(app: App, title: string, message: string, onConfirm: () =
 }
 
 function createDetailsSection(containerEl: HTMLElement, title: string, open = false): HTMLDetailsElement {
-	const detailsEl = containerEl.createEl("details", { cls: "yaos-settings-details" });
+	const detailsEl = containerEl.createEl("details", { cls: "lodestone-settings-details" });
 	detailsEl.open = open;
 	detailsEl.createEl("summary", {
 		text: title,
-		cls: "yaos-settings-details-summary",
+		cls: "lodestone-settings-details-summary",
 	});
 	return detailsEl;
 }
@@ -194,22 +194,22 @@ class PairDeviceModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.addClass("yaos-pair-device-modal");
+		contentEl.addClass("lodestone-pair-device-modal");
 
 		contentEl.createEl("h3", { text: "Pair another device" });
 		contentEl.createEl("p", {
 			text: "Scan this setup code on your phone to open the setup page. If the plugin is not installed yet, the page will guide you through the beta install flow first.",
-			cls: "yaos-modal-copy",
+			cls: "lodestone-modal-copy",
 		});
 
-		const qrWrap = contentEl.createDiv({ cls: "yaos-pair-device-qr-wrap" });
+		const qrWrap = contentEl.createDiv({ cls: "lodestone-pair-device-qr-wrap" });
 
 		const loadingEl = qrWrap.createEl("div", {
 			text: "Generating setup code...",
-			cls: "yaos-pair-device-loading",
+			cls: "lodestone-pair-device-loading",
 		});
 
-		this.qrCanvas = qrWrap.createEl("canvas", { cls: "yaos-pair-device-qr-canvas" });
+		this.qrCanvas = qrWrap.createEl("canvas", { cls: "lodestone-pair-device-qr-canvas" });
 		this.qrCanvas.hidden = true;
 
 		void QRCode.toCanvas(this.qrCanvas, this.mobileUrl, {
@@ -242,10 +242,10 @@ class PairDeviceModal extends Modal {
 		});
 
 		const manualDetails = createDetailsSection(contentEl, "Desktop or manual setup", false);
-		const manualBody = manualDetails.createDiv({ cls: "yaos-settings-details-body" });
+		const manualBody = manualDetails.createDiv({ cls: "lodestone-settings-details-body" });
 
 		manualBody.createEl("h4", { text: "Mobile setup URL" });
-		const mobileInput = manualBody.createEl("textarea", { cls: "yaos-settings-modal-textarea" });
+		const mobileInput = manualBody.createEl("textarea", { cls: "lodestone-settings-modal-textarea" });
 		mobileInput.value = this.mobileUrl;
 		mobileInput.readOnly = true;
 		mobileInput.rows = 3;
@@ -262,7 +262,7 @@ class PairDeviceModal extends Modal {
 		});
 
 		manualBody.createEl("h4", { text: "Desktop deep link" });
-		const deepInput = manualBody.createEl("textarea", { cls: "yaos-settings-modal-textarea" });
+		const deepInput = manualBody.createEl("textarea", { cls: "lodestone-settings-modal-textarea" });
 		deepInput.value = this.deepLink;
 		deepInput.readOnly = true;
 		deepInput.rows = 3;
@@ -294,11 +294,11 @@ class RecoveryKitModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.addClass("yaos-recovery-kit-modal");
+		contentEl.addClass("lodestone-recovery-kit-modal");
 
 		contentEl.createEl("h3", { text: "Backup connection details" });
 
-		const warning = contentEl.createDiv({ cls: "callout yaos-settings-callout" });
+		const warning = contentEl.createDiv({ cls: "callout lodestone-settings-callout" });
 		warning.setAttr("data-callout", "warning");
 
 		const warningTitle = warning.createDiv({ cls: "callout-title" });
@@ -309,7 +309,7 @@ class RecoveryKitModal extends Modal {
 			text: "Save this somewhere safe, like a password manager. If you lose all your devices, you will need this exact vault ID and token to recover your notes from your server.",
 		});
 
-		const textArea = contentEl.createEl("textarea", { cls: "yaos-settings-modal-textarea" });
+		const textArea = contentEl.createEl("textarea", { cls: "lodestone-settings-modal-textarea" });
 		textArea.value = this.recoveryKit;
 		textArea.readOnly = true;
 		textArea.rows = 10;
@@ -372,22 +372,22 @@ class RoomInviteModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.addClass("yaos-pair-device-modal");
+		contentEl.addClass("lodestone-pair-device-modal");
 
 		const inviteUrl = buildRoomInviteUrl(this.host, this.token, this.room);
 
 		contentEl.createEl("h3", { text: `Invite to "${this.room.displayName}"` });
 		contentEl.createEl("p", {
 			text: "Share this link with another vault. They will join this room and receive the shared folders in real time.",
-			cls: "yaos-modal-copy",
+			cls: "lodestone-modal-copy",
 		});
 
-		const qrWrap = contentEl.createDiv({ cls: "yaos-pair-device-qr-wrap" });
+		const qrWrap = contentEl.createDiv({ cls: "lodestone-pair-device-qr-wrap" });
 		const loadingEl = qrWrap.createEl("div", {
 			text: "Generating invite code...",
-			cls: "yaos-pair-device-loading",
+			cls: "lodestone-pair-device-loading",
 		});
-		this.qrCanvas = qrWrap.createEl("canvas", { cls: "yaos-pair-device-qr-canvas" });
+		this.qrCanvas = qrWrap.createEl("canvas", { cls: "lodestone-pair-device-qr-canvas" });
 		this.qrCanvas.hidden = true;
 
 		void QRCode.toCanvas(this.qrCanvas, inviteUrl, {
@@ -441,7 +441,7 @@ class CreateRoomModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.addClass("yaos-pair-device-modal");
+		contentEl.addClass("lodestone-pair-device-modal");
 		contentEl.createEl("h3", { text: "Create a room" });
 
 		new Setting(contentEl)
@@ -467,7 +467,7 @@ class CreateRoomModal extends Modal {
 				}),
 			);
 
-		this.pathListEl = contentEl.createDiv({ cls: "yaos-settings-details-body" });
+		this.pathListEl = contentEl.createDiv({ cls: "lodestone-settings-details-body" });
 		this.renderPathList();
 
 		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
@@ -503,8 +503,8 @@ class CreateRoomModal extends Modal {
 			return;
 		}
 		for (const p of this.selectedPaths) {
-			const row = this.pathListEl.createDiv({ cls: "yaos-settings-card-row" });
-			row.createSpan({ text: p, cls: "yaos-settings-card-value" });
+			const row = this.pathListEl.createDiv({ cls: "lodestone-settings-card-row" });
+			row.createSpan({ text: p, cls: "lodestone-settings-card-value" });
 			row.createEl("button", { text: "Remove" }).addEventListener("click", () => {
 				this.selectedPaths = this.selectedPaths.filter((x) => x !== p);
 				this.renderPathList();
@@ -538,7 +538,7 @@ class EditRoomModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.addClass("yaos-pair-device-modal");
+		contentEl.addClass("lodestone-pair-device-modal");
 		contentEl.createEl("h3", { text: "Edit room" });
 
 		new Setting(contentEl)
@@ -564,7 +564,7 @@ class EditRoomModal extends Modal {
 				}),
 			);
 
-		this.pathListEl = contentEl.createDiv({ cls: "yaos-settings-details-body" });
+		this.pathListEl = contentEl.createDiv({ cls: "lodestone-settings-details-body" });
 		this.renderPathList();
 
 		const buttons = contentEl.createDiv({ cls: "modal-button-container" });
@@ -600,8 +600,8 @@ class EditRoomModal extends Modal {
 			return;
 		}
 		for (const p of this.selectedPaths) {
-			const row = this.pathListEl.createDiv({ cls: "yaos-settings-card-row" });
-			row.createSpan({ text: p, cls: "yaos-settings-card-value" });
+			const row = this.pathListEl.createDiv({ cls: "lodestone-settings-card-row" });
+			row.createSpan({ text: p, cls: "lodestone-settings-card-value" });
 			row.createEl("button", { text: "Remove" }).addEventListener("click", () => {
 				this.selectedPaths = this.selectedPaths.filter((x) => x !== p);
 				this.renderPathList();
@@ -625,23 +625,23 @@ class JoinRoomModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.addClass("yaos-pair-device-modal");
+		contentEl.addClass("lodestone-pair-device-modal");
 		contentEl.createEl("h3", { text: "Join a room" });
 		contentEl.createEl("p", {
 			text: "Paste the invite link you received from the hub vault.",
-			cls: "yaos-modal-copy",
+			cls: "lodestone-modal-copy",
 		});
 
 		let inviteUrl = "";
 		let hubPaths: string[] = [];
 		const aliasInputs = new Map<string, HTMLInputElement>();
 
-		const textArea = contentEl.createEl("textarea", { cls: "yaos-settings-modal-textarea" });
+		const textArea = contentEl.createEl("textarea", { cls: "lodestone-settings-modal-textarea" });
 		textArea.rows = 3;
-		textArea.placeholder = "obsidian://yaos?action=room&…";
+		textArea.placeholder = "obsidian://lodestone?action=room&…";
 
 		// Section shown when hub shares named folders — lets the spoke rename them locally.
-		const aliasSection = contentEl.createDiv({ cls: "yaos-settings-alias-section" });
+		const aliasSection = contentEl.createDiv({ cls: "lodestone-settings-alias-section" });
 		aliasSection.style.display = "none";
 
 		const renderAliasSection = () => {
@@ -653,14 +653,14 @@ class JoinRoomModal extends Modal {
 			aliasSection.style.display = "";
 			aliasSection.createEl("p", {
 				text: "Optional: rename shared folders on this vault.",
-				cls: "yaos-modal-copy",
+				cls: "lodestone-modal-copy",
 			});
 			aliasInputs.clear();
 			for (const hubPath of hubPaths) {
-				const row = aliasSection.createDiv({ cls: "yaos-settings-alias-row" });
-				row.createSpan({ text: hubPath, cls: "yaos-settings-alias-hub-label" });
-				row.createSpan({ text: "→", cls: "yaos-settings-alias-arrow" });
-				const input = row.createEl("input", { type: "text", cls: "yaos-settings-alias-input" });
+				const row = aliasSection.createDiv({ cls: "lodestone-settings-alias-row" });
+				row.createSpan({ text: hubPath, cls: "lodestone-settings-alias-hub-label" });
+				row.createSpan({ text: "→", cls: "lodestone-settings-alias-arrow" });
+				const input = row.createEl("input", { type: "text", cls: "lodestone-settings-alias-input" });
 				input.placeholder = hubPath.replace(/\/$/, "");
 				input.value = "";
 				aliasInputs.set(hubPath, input);
@@ -725,7 +725,7 @@ function buildRoomInviteUrl(host: string, token: string, room: RoomConfig): stri
 	if (room.includePaths.length > 0) {
 		params.set("paths", room.includePaths.join(","));
 	}
-	return `obsidian://yaos?${params.toString()}`;
+	return `obsidian://lodestone?${params.toString()}`;
 }
 
 export class VaultSyncSettingTab extends PluginSettingTab {
@@ -739,7 +739,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-		containerEl.addClass("yaos-settings-tab");
+		containerEl.addClass("lodestone-settings-tab");
 		const authMode = this.plugin.serverAuthMode;
 		const attachmentsAvailable = this.plugin.serverSupportsAttachments;
 		const setupIncomplete = !this.plugin.settings.host || !this.plugin.settings.token;
@@ -747,10 +747,10 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 		// ── Section 1: Connection (always shown) ──────────────────────────────
 		const connectionDetails = createDetailsSection(containerEl, "Connection", true);
-		const connectionBody = connectionDetails.createDiv({ cls: "yaos-settings-details-body" });
+		const connectionBody = connectionDetails.createDiv({ cls: "lodestone-settings-details-body" });
 
 		if (setupIncomplete) {
-			const callout = connectionBody.createDiv({ cls: "callout yaos-settings-setup-callout" });
+			const callout = connectionBody.createDiv({ cls: "callout lodestone-settings-setup-callout" });
 			callout.setAttr("data-callout", "warning");
 			callout.createDiv({ cls: "callout-title" }).createSpan({ text: "Connection required" });
 			const calloutContent = callout.createDiv({ cls: "callout-content" });
@@ -759,7 +759,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			});
 			calloutContent.createEl("p", {
 				text: "After deployment, open your host URL in a browser, claim the server, then use the setup link.",
-				cls: "yaos-settings-setup-hint",
+				cls: "lodestone-settings-setup-hint",
 			});
 			new Setting(calloutContent)
 				.setName("Deploy your server")
@@ -775,25 +775,25 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 			// Manual setup — expanded when no connection is configured
 			const manualDetails = createDetailsSection(connectionBody, "Manual setup", true);
-			const manualBody = manualDetails.createDiv({ cls: "yaos-settings-details-body" });
+			const manualBody = manualDetails.createDiv({ cls: "lodestone-settings-details-body" });
 			manualBody.createEl("p", {
 				text: "Claim your server in the browser, then use the setup link. You can also paste your connection details here directly.",
-				cls: "yaos-settings-details-intro",
+				cls: "lodestone-settings-details-intro",
 			});
 			this.renderConnectionFields(manualBody, authMode);
 		} else {
 			// Connected status card
-			const card = connectionBody.createDiv({ cls: "yaos-settings-status-card" });
-			const statusLine = card.createDiv({ cls: "yaos-settings-status-line" });
-			const titleWrap = statusLine.createDiv({ cls: "yaos-settings-status-copy" });
-			titleWrap.createEl("div", { text: "Connected to Host", cls: "yaos-settings-status-title" });
+			const card = connectionBody.createDiv({ cls: "lodestone-settings-status-card" });
+			const statusLine = card.createDiv({ cls: "lodestone-settings-status-line" });
+			const titleWrap = statusLine.createDiv({ cls: "lodestone-settings-status-copy" });
+			titleWrap.createEl("div", { text: "Connected to Host", cls: "lodestone-settings-status-title" });
 			titleWrap.createEl("div", {
 				text: "Your vault is connected to its host server and syncing.",
-				cls: "yaos-settings-status-subtitle",
+				cls: "lodestone-settings-status-subtitle",
 			});
 			statusLine.createSpan({
 				text: syncStatus.label,
-				cls: `yaos-settings-status-badge ${statusClass(syncStatus.state)}`,
+				cls: `lodestone-settings-status-badge ${statusClass(syncStatus.state)}`,
 			});
 
 			addCardRow(card, "Host", this.plugin.settings.host);
@@ -802,9 +802,9 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 			const connectedDevices = this.plugin.getConnectedDevices();
 			const othersOnline = connectedDevices.filter((d) => !d.isLocal);
-			const deviceRow = card.createDiv({ cls: "yaos-settings-card-row" });
-			deviceRow.createSpan({ text: "Online devices", cls: "yaos-settings-card-label" });
-			const deviceValueEl = deviceRow.createDiv({ cls: "yaos-settings-card-value" });
+			const deviceRow = card.createDiv({ cls: "lodestone-settings-card-row" });
+			deviceRow.createSpan({ text: "Online devices", cls: "lodestone-settings-card-label" });
+			const deviceValueEl = deviceRow.createDiv({ cls: "lodestone-settings-card-value" });
 			if (othersOnline.length === 0) {
 				deviceValueEl.setText("None");
 			} else {
@@ -813,7 +813,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				}
 			}
 
-			const actionRow = card.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
+			const actionRow = card.createDiv({ cls: "modal-button-container lodestone-settings-status-actions" });
 			actionRow.createEl("button", { text: "Backup connection details" }).addEventListener("click", () => {
 				const recoveryKit = this.plugin.buildRecoveryKitText();
 				if (!recoveryKit) {
@@ -840,14 +840,14 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 			// Change connection (collapsed — for users who need to update host/token)
 			const changeDetails = createDetailsSection(connectionBody, "Change connection", false);
-			const changeBody = changeDetails.createDiv({ cls: "yaos-settings-details-body" });
+			const changeBody = changeDetails.createDiv({ cls: "lodestone-settings-details-body" });
 			this.renderConnectionFields(changeBody, authMode);
 		}
 
 		// ── Section 2: Rooms ─────────────────────────────────────────────────
 		if (!setupIncomplete) {
 			const roomsDetails = createDetailsSection(containerEl, "Rooms", true);
-			const roomsBody = roomsDetails.createDiv({ cls: "yaos-settings-details-body" });
+			const roomsBody = roomsDetails.createDiv({ cls: "lodestone-settings-details-body" });
 			const { rooms } = this.plugin.settings;
 
 			if (rooms.length === 0) {
@@ -857,29 +857,29 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				});
 			} else {
 				for (const room of rooms) {
-					const card = roomsBody.createDiv({ cls: "yaos-settings-status-card" });
-					const titleLine = card.createDiv({ cls: "yaos-settings-status-line" });
-					const titleWrap = titleLine.createDiv({ cls: "yaos-settings-status-copy" });
-					titleWrap.createEl("div", { text: room.displayName, cls: "yaos-settings-status-title" });
+					const card = roomsBody.createDiv({ cls: "lodestone-settings-status-card" });
+					const titleLine = card.createDiv({ cls: "lodestone-settings-status-line" });
+					const titleWrap = titleLine.createDiv({ cls: "lodestone-settings-status-copy" });
+					titleWrap.createEl("div", { text: room.displayName, cls: "lodestone-settings-status-title" });
 					titleWrap.createEl("div", {
 						text: room.role === "hub"
 							? `Sharing ${room.includePaths.length} folder${room.includePaths.length !== 1 ? "s" : ""}`
 							: `Receiving from hub`,
-						cls: "yaos-settings-status-subtitle",
+						cls: "lodestone-settings-status-subtitle",
 					});
 					titleLine.createSpan({
 						text: room.role === "hub" ? "Hub" : "Spoke",
-						cls: `yaos-settings-status-badge ${room.role === "hub" ? "is-connected" : "is-busy"}`,
+						cls: `lodestone-settings-status-badge ${room.role === "hub" ? "is-connected" : "is-busy"}`,
 					});
 
 					if (room.role === "hub" && room.includePaths.length > 0) {
-						const pathList = card.createDiv({ cls: "yaos-settings-details-body" });
+						const pathList = card.createDiv({ cls: "lodestone-settings-details-body" });
 						for (const p of room.includePaths) {
 							pathList.createEl("div", { text: p, cls: "setting-item-description" });
 						}
 					}
 
-					const actions = card.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
+					const actions = card.createDiv({ cls: "modal-button-container lodestone-settings-status-actions" });
 
 					if (room.role === "hub") {
 						actions.createEl("button", { text: "Invite" }).addEventListener("click", () => {
@@ -918,7 +918,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				}
 			}
 
-			const roomsActions = roomsBody.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
+			const roomsActions = roomsBody.createDiv({ cls: "modal-button-container lodestone-settings-status-actions" });
 			roomsActions.createEl("button", { text: "Create a room", cls: rooms.length === 0 ? "mod-cta" : "" })
 				.addEventListener("click", () => {
 					new CreateRoomModal(this.app, async (name, paths) => {
@@ -940,7 +940,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			const updateState = this.plugin.getUpdateState();
 			addSectionHeading(containerEl, "Updates");
 
-			const updateCard = containerEl.createDiv({ cls: "yaos-settings-status-card" });
+			const updateCard = containerEl.createDiv({ cls: "lodestone-settings-status-card" });
 			addCardRow(updateCard, "Server version", updateState.serverVersion ?? "Unknown");
 			addCardRow(updateCard, "Latest server", updateState.latestServerVersion ?? "Unknown");
 			addCardRow(updateCard, "Plugin version", updateState.pluginVersion);
@@ -956,28 +956,28 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				: updateState.pluginUpdateRecommended
 					? "This device should update the Lodestone plugin soon."
 					: "Server is up to date.";
-			updateCard.createEl("p", { text: summaryText, cls: "yaos-settings-status-subtitle" });
+			updateCard.createEl("p", { text: summaryText, cls: "lodestone-settings-status-subtitle" });
 			if (!updateState.updateRepoUrl) {
 				updateCard.createEl("p", {
 					text: "Set a deployment repo URL in Advanced to enable plugin update tracking.",
-					cls: "yaos-settings-status-subtitle",
+					cls: "lodestone-settings-status-subtitle",
 				});
 			}
 
 			if (updateState.pluginCompatibilityWarning) {
 				updateCard.createEl("p", {
 					text: updateState.pluginCompatibilityWarning,
-					cls: "yaos-settings-security-warning",
+					cls: "lodestone-settings-security-warning",
 				});
 			}
 			if (updateState.legacyServerDetected) {
 				updateCard.createEl("p", {
 					text: "Legacy server detected. Sync will continue, but update metadata and 1-click updater features need a newer server.",
-					cls: "yaos-settings-security-warning",
+					cls: "lodestone-settings-security-warning",
 				});
 			}
 
-			const updateActions = updateCard.createDiv({ cls: "modal-button-container yaos-settings-status-actions" });
+			const updateActions = updateCard.createDiv({ cls: "modal-button-container lodestone-settings-status-actions" });
 			updateActions.createEl("button", { text: "Refresh update info" }).addEventListener("click", () => {
 				void this.plugin.refreshServerCapabilities("settings-refresh");
 				void this.plugin.refreshUpdateManifest("settings-refresh", true).then(() => this.display());
@@ -1069,8 +1069,8 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 				);
 
 			if (!attachmentsAvailable) {
-				const noR2Note = containerEl.createDiv({ cls: "yaos-settings-attachment-callout" });
-				const noR2Text = noR2Note.createEl("p", { cls: "yaos-settings-status-subtitle" });
+				const noR2Note = containerEl.createDiv({ cls: "lodestone-settings-attachment-callout" });
+				const noR2Text = noR2Note.createEl("p", { cls: "lodestone-settings-status-subtitle" });
 				noR2Text.appendText("Attachment sync requires a Cloudflare R2 bucket — ");
 				const setupLink = noR2Text.createEl("a", {
 					text: "watch the 1-minute setup guide",
@@ -1132,7 +1132,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 		// ── Advanced ──────────────────────────────────────────────────────────
 		const advancedDetails = createDetailsSection(containerEl, "Advanced", false);
-		const advancedBody = advancedDetails.createDiv({ cls: "yaos-settings-details-body" });
+		const advancedBody = advancedDetails.createDiv({ cls: "lodestone-settings-details-body" });
 
 		new Setting(advancedBody)
 			.setName("Vault ID")
@@ -1149,7 +1149,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 		new Setting(advancedBody)
 			.setName("Deployment repo URL")
-			.setDesc("Optional. Example: https://github.com/you/yaos-server. Provider is inferred from this URL.")
+			.setDesc("Optional. Example: https://github.com/you/lodestone-server. Provider is inferred from this URL.")
 			.addText((text) =>
 				text
 					.setPlaceholder("Paste the generated GitHub or GitLab repo URL")
@@ -1245,7 +1245,7 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 		if (isInsecureRemoteHost(this.plugin.settings.host)) {
 			containerEl.createEl("p", {
 				text: "This remote connection is unencrypted. Your sync token will be sent in plaintext. Use HTTPS for production.",
-				cls: "yaos-settings-security-warning",
+				cls: "lodestone-settings-security-warning",
 			});
 		}
 

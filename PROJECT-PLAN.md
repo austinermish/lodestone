@@ -185,6 +185,16 @@ Ship these as one or two patch releases before anything else.
 
 ## Phase 3 — Rename: YAOS → Lodestone
 
+> **STATUS: EXECUTED 2026-07-06** (ahead of schedule, on the `project-plan-lodestone`
+> branch, as v3.0.0). Austin confirmed no live installs existed, so the data.json
+> migration shim (3.1) and all legacy-compatibility windows (dual protocol actions,
+> dual route prefixes, old binding names) were **intentionally skipped** — this was
+> a clean-break rename: plugin id `lodestone`, `obsidian://lodestone`,
+> `/__lodestone/*` routes, `LODESTONE_*` bindings, `lodestone-server.zip`,
+> workflow files renamed. The GitHub repo was renamed to `austinermish/lodestone`
+> (old URLs redirect). Sections below are retained for reference; treat 3.1's shim
+> as NOT needed unless supporting pre-3.0 installs ever becomes a goal.
+
 **Decision made: the new name is Lodestone.** Do this after Phases 1–2 ship, before
 the large refactors (so the refactors land under the new name without double churn).
 

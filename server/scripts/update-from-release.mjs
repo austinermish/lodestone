@@ -13,30 +13,30 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 const defaultReleaseRepo = "austinermish/lodestone";
-const releaseRepo = process.env.YAOS_RELEASE_REPO?.trim() || defaultReleaseRepo;
-const releaseVersion = process.env.YAOS_RELEASE_VERSION?.trim() ?? "";
+const releaseRepo = process.env.LODESTONE_RELEASE_REPO?.trim() || defaultReleaseRepo;
+const releaseVersion = process.env.LODESTONE_RELEASE_VERSION?.trim() ?? "";
 const explicitArtifactInput =
-	process.env.YAOS_RELEASE_FILE?.trim() ?? process.env.YAOS_RELEASE_URL?.trim() ?? "";
+	process.env.LODESTONE_RELEASE_FILE?.trim() ?? process.env.LODESTONE_RELEASE_URL?.trim() ?? "";
 const artifactSource = explicitArtifactInput
 	? resolveArtifactSource(explicitArtifactInput)
 	: releaseVersion
 		? {
 				type: "remote",
 				label: `GitHub release ${releaseRepo}@${releaseVersion}`,
-				value: `https://github.com/${releaseRepo}/releases/download/${releaseVersion}/yaos-server.zip`,
+				value: `https://github.com/${releaseRepo}/releases/download/${releaseVersion}/lodestone-server.zip`,
 			}
 		: {
 				type: "remote",
 				label: `latest GitHub release from ${releaseRepo}`,
-				value: `https://github.com/${releaseRepo}/releases/latest/download/yaos-server.zip`,
+				value: `https://github.com/${releaseRepo}/releases/latest/download/lodestone-server.zip`,
 			};
 
 const repoRoot = resolve(".");
-const tempDir = mkdtempSync(join(tmpdir(), "yaos-server-update-"));
-const zipPath = join(tempDir, "yaos-server.zip");
+const tempDir = mkdtempSync(join(tmpdir(), "lodestone-server-update-"));
+const zipPath = join(tempDir, "lodestone-server.zip");
 const extractDir = join(tempDir, "extract");
 const protectedPrefixes = [".github", ".github/"];
-const allowMigrationUpdate = process.env.YAOS_ALLOW_MIGRATION_UPDATE?.trim().toLowerCase() === "true";
+const allowMigrationUpdate = process.env.LODESTONE_ALLOW_MIGRATION_UPDATE?.trim().toLowerCase() === "true";
 
 function collectTomlArrayBindingValues(source, sectionName, keyName) {
 	const values = new Set();
@@ -130,23 +130,23 @@ function resolveArtifactSource(input) {
 	const normalizedPath = input.startsWith("file://") ? new URL(input) : resolve(input);
 	const filePath = normalizedPath instanceof URL ? normalizedPath : normalizedPath;
 	if (!existsSync(filePath)) {
-		throw new Error(`Local YAOS server artifact was not found: ${filePath}`);
+		throw new Error(`Local Lodestone server artifact was not found: ${filePath}`);
 	}
 	return { type: "local", label: String(filePath), value: String(filePath) };
 }
 
 async function stageArtifactZip() {
 	if (artifactSource.type === "local") {
-		console.log(`Using local YAOS server artifact from ${artifactSource.label}`);
+		console.log(`Using local Lodestone server artifact from ${artifactSource.label}`);
 		cpSync(artifactSource.value, zipPath);
 		return;
 	}
 
-	console.log(`Downloading YAOS server artifact from ${artifactSource.label}`);
+	console.log(`Downloading Lodestone server artifact from ${artifactSource.label}`);
 	const response = await fetch(artifactSource.value, {
 		redirect: "follow",
 		headers: {
-			"User-Agent": "yaos-server-updater",
+			"User-Agent": "lodestone-server-updater",
 		},
 	});
 	if (!response.ok) {
@@ -156,7 +156,7 @@ async function stageArtifactZip() {
 				[
 					baseMessage,
 					"Expected release assets were not found.",
-					"Make sure the selected release includes BOTH 'yaos-server.zip' and 'update-manifest.json'.",
+					"Make sure the selected release includes BOTH 'lodestone-server.zip' and 'update-manifest.json'.",
 					`release_repo=${releaseRepo}${releaseVersion ? ` version=${releaseVersion}` : " version=latest"}`,
 				].join(" "),
 			);
@@ -171,7 +171,7 @@ async function main() {
 	mkdirSync(extractDir, { recursive: true });
 	execFileSync("unzip", ["-q", zipPath, "-d", extractDir], { stdio: "inherit" });
 
-	const manifestPath = join(extractDir, "yaos-server-manifest.json");
+	const manifestPath = join(extractDir, "lodestone-server-manifest.json");
 	const rawManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 	if (!Array.isArray(rawManifest.updateOwnedPaths)) {
 		throw new Error("Artifact manifest is missing updateOwnedPaths");
@@ -179,10 +179,10 @@ async function main() {
 	if (rawManifest.migrationRequired === true && !allowMigrationUpdate) {
 		throw new Error(
 			[
-				"STOP: this YAOS release is marked as migration-required.",
+				"STOP: this Lodestone release is marked as migration-required.",
 				"Automatic updates are disabled for migration-required releases to protect Durable Object/SQLite state.",
 				"Read the upgrade guide and apply the migration manually before re-running this updater.",
-				"If you intentionally want to bypass this guard, set YAOS_ALLOW_MIGRATION_UPDATE=true.",
+				"If you intentionally want to bypass this guard, set LODESTONE_ALLOW_MIGRATION_UPDATE=true.",
 			].join(" "),
 		);
 	}
@@ -220,7 +220,7 @@ async function main() {
 	}
 
 	console.log(
-		`Applied YAOS server artifact${rawManifest.serverVersion ? ` ${rawManifest.serverVersion}` : ""}`,
+		`Applied Lodestone server artifact${rawManifest.serverVersion ? ` ${rawManifest.serverVersion}` : ""}`,
 	);
 }
 

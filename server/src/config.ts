@@ -85,11 +85,11 @@ export class ServerConfig {
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 
-		if (request.method === "GET" && url.pathname === "/__yaos/config") {
+		if (request.method === "GET" && url.pathname === "/__lodestone/config") {
 			return json(await this.readConfig());
 		}
 
-		if (request.method === "POST" && url.pathname === "/__yaos/claim") {
+		if (request.method === "POST" && url.pathname === "/__lodestone/claim") {
 			let body: { tokenHash?: string } = {};
 			try {
 				body = await request.json();
@@ -114,7 +114,7 @@ export class ServerConfig {
 			});
 		}
 
-		if (request.method === "POST" && url.pathname === "/__yaos/update-metadata") {
+		if (request.method === "POST" && url.pathname === "/__lodestone/update-metadata") {
 			let body: {
 				updateProvider?: unknown;
 				updateRepoUrl?: unknown;
