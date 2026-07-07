@@ -49,13 +49,18 @@ npm typecheck     # Type-check only
 Do **not** use `npm version` — it auto-commits and is blocked by the harness. Do it manually with git:
 
 ```bash
-# 1. Edit the version string in three files:
-#    package.json        → "version": "X.Y.Z"
-#    manifest.json       → "version": "X.Y.Z"
-#    versions.json       → add "X.Y.Z": "1.5.0"   (append to end of object)
+# 1. Edit the version string in four files:
+#    package.json                                     → "version": "X.Y.Z"
+#    manifest.json                                     → "version": "X.Y.Z"
+#    versions.json                                     → add "X.Y.Z": "1.5.0"   (append to end of object)
+#    server/.github/workflows/lodestone-ops.yml        → ...lodestone-ops-reusable.yml@X.Y.Z
+#      (this file is cloned into every self-hoster's deploy repo by the Deploy-to-
+#      Cloudflare button — it must pin to a real tag, not @main, or a compromise of
+#      this repo's default branch cascades into every deployed server's ops workflow,
+#      which runs with contents: write on the self-hoster's repo)
 
 # 2. Commit the version bump
-git add package.json manifest.json versions.json
+git add package.json manifest.json versions.json server/.github/workflows/lodestone-ops.yml
 git commit -m "X.Y.Z"
 
 # 3. Push

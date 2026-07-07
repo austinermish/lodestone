@@ -132,6 +132,42 @@ export class VaultSyncServer extends YServer {
 
 	async fetch(request: Request): Promise<Response> {
 		this.captureRoomIdHint(request);
+
+		// Serve routes that don't need the CRDT document BEFORE super.fetch()
+		// triggers onStart -> onLoad -> ensureDocumentLoaded(). Without this,
+		// every /meta, /debug, and /trace request — including auth-rejection
+		// telemetry — fully replays the checkpoint+journal on a cold DO.
+		const url = new URL(request.url);
+
+		if (request.method === "GET" && url.pathname === "/__lodestone/meta") {
+			return json({
+				roomId: this.getRoomId(),
+				meta: await this.readRoomMetaCheap(),
+			});
+		}
+
+		if (request.method === "GET" && url.pathname === "/__lodestone/debug") {
+			const recent = await listRecentTraceEntries(this.ctx.storage, TRACE_DEBUG_LIMIT);
+			return json({
+				roomId: this.getRoomId(),
+				recent,
+			});
+		}
+
+		if (request.method === "POST" && url.pathname === "/__lodestone/trace") {
+			let body: { event?: string; data?: Record<string, unknown> } = {};
+			try {
+				body = await request.json();
+			} catch {
+				return json({ error: "invalid json" }, 400);
+			}
+			if (!body.event || typeof body.event !== "string") {
+				return json({ error: "missing event" }, 400);
+			}
+			await this.recordTrace(body.event, body.data ?? {});
+			return json({ ok: true });
+		}
+
 		return super.fetch(request);
 	}
 
@@ -175,12 +211,8 @@ export class VaultSyncServer extends YServer {
 	async onRequest(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 
-		if (request.method === "GET" && url.pathname === "/__lodestone/meta") {
-			return json({
-				roomId: this.getRoomId(),
-				meta: await this.readRoomMetaCheap(),
-			});
-		}
+		// /meta, /debug, /trace are handled in fetch() before this method runs
+		// (they don't need the document loaded — see the comment there).
 
 		if (request.method === "GET" && url.pathname === "/__lodestone/document") {
 			return new Response(Y.encodeStateAsUpdate(this.document), {
@@ -189,30 +221,6 @@ export class VaultSyncServer extends YServer {
 					"Cache-Control": "no-store",
 				},
 			});
-		}
-
-		if (request.method === "GET" && url.pathname === "/__lodestone/debug") {
-			const recent = await listRecentTraceEntries(this.ctx.storage, TRACE_DEBUG_LIMIT);
-			return json({
-				roomId: this.getRoomId(),
-				recent,
-			});
-		}
-
-		if (request.method === "POST" && url.pathname === "/__lodestone/trace") {
-			let body: { event?: string; data?: Record<string, unknown> } = {};
-			try {
-				body = await request.json();
-			} catch {
-				return json({ error: "invalid json" }, 400);
-			}
-
-			if (!body.event || typeof body.event !== "string") {
-				return json({ error: "missing event" }, 400);
-			}
-
-			await this.recordTrace(body.event, body.data ?? {});
-			return json({ ok: true });
 		}
 
 		if (request.method === "POST" && url.pathname === "/__lodestone/set-mode") {
@@ -288,9 +296,28 @@ export class VaultSyncServer extends YServer {
 			const svAfter = Y.encodeStateVector(this.document);
 
 			if (!equalBytes(svBefore, svAfter)) {
+				// Fan-out delta: just this handler's own contribution (svBefore is
+				// exactly the state right before this apply — correct as-is).
 				const hubDelta = Y.encodeStateAsUpdate(this.document, svBefore);
 				if (hubDelta.byteLength > 0) {
-					await this.enqueueSave(hubDelta, svAfter);
+					// PERSISTED delta: relative to lastSavedStateVector, not svBefore.
+					// svBefore only excludes changes THIS handler introduced; it can
+					// still be ahead of the last value actually written to the
+					// journal (e.g. a concurrent onSave still pending, or one whose
+					// journal write failed and self-heals on its own next run).
+					// Persisting from svBefore while advancing lastSavedStateVector
+					// to svAfter would silently mark that earlier gap as persisted
+					// without ever having written it — lost on DO eviction before
+					// the next checkpoint. Read fresh here: everything above is
+					// synchronous since svBefore was captured, so no concurrent job
+					// can have moved lastSavedStateVector in between.
+					const persistBase = this.lastSavedStateVector ?? svBefore;
+					const persistDelta = equalBytes(persistBase, svBefore)
+						? hubDelta
+						: Y.encodeStateAsUpdate(this.document, persistBase);
+					if (persistDelta.byteLength > 0) {
+						await this.enqueueSave(persistDelta, svAfter);
+					}
 					// Fan out the merged delta to all other spokes.
 					const mode = await this.getMode();
 					if (mode === "hub") {
@@ -331,7 +358,12 @@ export class VaultSyncServer extends YServer {
 			const svAfter = Y.encodeStateVector(this.document);
 
 			if (!equalBytes(svBefore, svAfter)) {
-				const spokeDelta = Y.encodeStateAsUpdate(this.document, svBefore);
+				// Persist relative to lastSavedStateVector, not svBefore — see the
+				// matching comment in apply-spoke-update above. This delta is only
+				// used for persistence here (spokes don't fan out further), so
+				// there's no separate fan-out variant to keep.
+				const persistBase = this.lastSavedStateVector ?? svBefore;
+				const spokeDelta = Y.encodeStateAsUpdate(this.document, persistBase);
 				if (spokeDelta.byteLength > 0) {
 					await this.enqueueSave(spokeDelta, svAfter);
 				}

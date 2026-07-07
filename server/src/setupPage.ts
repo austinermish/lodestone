@@ -1,3 +1,5 @@
+import { QR_BUNDLE_JS } from "./generated/qrBundle";
+
 interface SetupPageOptions {
 	host: string;
 	deployRepo?: string;
@@ -23,6 +25,19 @@ function escapeHtml(value: string): string {
 		.replace(/"/g, "&quot;");
 }
 
+export interface RenderedPage {
+	html: string;
+	/** Pass to the response as Content-Security-Policy: script-src 'nonce-<nonce>' ... */
+	nonce: string;
+}
+
+/** Per-response nonce so inline <script> tags can be allowed by a strict CSP
+ * (script-src 'nonce-...') instead of 'unsafe-inline', which would defeat the
+ * point of having a CSP on the page that holds a fresh sync token. */
+function scriptNonce(): string {
+	return crypto.randomUUID().replace(/-/g, "");
+}
+
 const IS_MARKETPLACE_APPROVED = false;
 const DEFAULT_DEPLOY_REPO = "austinermish/lodestone";
 
@@ -36,7 +51,8 @@ function normalizeDeployRepo(value: string | undefined): string {
 	return raw;
 }
 
-export function renderSetupPage(options: SetupPageOptions): string {
+export function renderSetupPage(options: SetupPageOptions): RenderedPage {
+	const nonce = scriptNonce();
 	const safeHost = escapeHtml(options.host);
 	const deployRepo = normalizeDeployRepo(options.deployRepo);
 	const releaseZipUrl = `https://github.com/${deployRepo}/releases/latest/download/lodestone.zip`;
@@ -54,7 +70,7 @@ export function renderSetupPage(options: SetupPageOptions): string {
               <p class="micro-text">Prefer manual installation? <a href="${releaseZipUrl}">Download the zip</a>.</p>
            </div>`;
 
-	return `<!DOCTYPE html>
+	const bodyHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -396,8 +412,8 @@ export function renderSetupPage(options: SetupPageOptions): string {
 
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
-  <script>
+  <script nonce="${nonce}">${QR_BUNDLE_JS}</script>
+  <script nonce="${nonce}">
     const initialView = document.getElementById("initial-view");
     const successFlow = document.getElementById("success-flow");
     const claimButton = document.getElementById("claim");
@@ -437,18 +453,16 @@ export function renderSetupPage(options: SetupPageOptions): string {
 	    }
 
     function renderQr(text) {
-      if (!text || !window.QRious) return;
+      if (!text || !window.LodestoneQR) return;
       qrEl.innerHTML = "";
       const canvas = document.createElement("canvas");
       qrEl.appendChild(canvas);
-      new window.QRious({
-        element: canvas,
-        value: text,
-        size: 240,
-        level: "M",
-        foreground: "#08111d",
-        background: "#ffffff",
-      });
+      window.LodestoneQR.toCanvas(canvas, text, {
+        width: 240,
+        margin: 1,
+        errorCorrectionLevel: "M",
+        color: { dark: "#08111d", light: "#ffffff" },
+      }).catch(function (err) { console.error("QR render failed:", err); });
     }
 
     // Toggle Step 2 state based on checkbox
@@ -563,12 +577,14 @@ export function renderSetupPage(options: SetupPageOptions): string {
   </script>
 </body>
 </html>`;
+	return { html: bodyHtml, nonce };
 }
 
-export function renderMobileSetupPage(options: MobileSetupPageOptions): string {
+export function renderMobileSetupPage(options: MobileSetupPageOptions): RenderedPage {
+	const nonce = scriptNonce();
 	const safeHost = escapeHtml(options.host);
 	const deployRepo = normalizeDeployRepo(options.deployRepo);
-	return `<!DOCTYPE html>
+	const bodyHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -682,7 +698,7 @@ export function renderMobileSetupPage(options: MobileSetupPageOptions): string {
 	    </details>
   </main>
 
-  <script>
+  <script nonce="${nonce}">
     const connectBtn = document.getElementById("connect-button");
 	    const statusEl = document.getElementById("status");
 	    const hostInput = document.getElementById("host-input");
@@ -732,15 +748,17 @@ export function renderMobileSetupPage(options: MobileSetupPageOptions): string {
   </script>
 </body>
 </html>`;
+	return { html: bodyHtml, nonce };
 }
 
-export function renderRunningPage(options: RunningPageOptions): string {
+export function renderRunningPage(options: RunningPageOptions): RenderedPage {
+	const nonce = scriptNonce();
 	const authLabel =
 		options.authMode === "env"
 			? "Secured by an environment token."
 			: "This server has been claimed and is locked.";
 
-	return `<!DOCTYPE html>
+	const bodyHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -808,8 +826,8 @@ export function renderRunningPage(options: RunningPageOptions): string {
       </div>
     </div>
   </main>
-  <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
-  <script>
+  <script nonce="${nonce}">${QR_BUNDLE_JS}</script>
+  <script nonce="${nonce}">
     (function () {
       var raw = null;
       try { raw = localStorage.getItem("lodestone-setup"); } catch (e) { return; }
@@ -851,10 +869,15 @@ export function renderRunningPage(options: RunningPageOptions): string {
         clearInterval(pollTimer);
       });
 
-      if (window.QRious) {
+      if (window.LodestoneQR) {
         var canvas = document.createElement("canvas");
         qrEl.appendChild(canvas);
-        new window.QRious({ element: canvas, value: mobileUrl, size: 200, level: "M", foreground: "#08111d", background: "#ffffff" });
+        window.LodestoneQR.toCanvas(canvas, mobileUrl, {
+          width: 200,
+          margin: 1,
+          errorCorrectionLevel: "M",
+          color: { dark: "#08111d", light: "#ffffff" },
+        }).catch(function (err) { console.error("QR render failed:", err); });
       }
       section.classList.add("show");
 
@@ -880,4 +903,5 @@ export function renderRunningPage(options: RunningPageOptions): string {
   </script>
 </body>
 </html>`;
+	return { html: bodyHtml, nonce };
 }

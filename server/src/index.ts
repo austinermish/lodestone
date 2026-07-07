@@ -12,7 +12,8 @@ import {
 	listSnapshots,
 	type SnapshotResult,
 } from "./snapshot";
-import { renderMobileSetupPage, renderRunningPage, renderSetupPage } from "./setupPage";
+import { type RenderedPage, renderMobileSetupPage, renderRunningPage, renderSetupPage } from "./setupPage";
+import { decodeAndValidateVaultId } from "./vaultId";
 import {
 	SERVER_MAX_SCHEMA_VERSION,
 	SERVER_MIGRATION_REQUIRED,
@@ -90,6 +91,29 @@ function html(body: string, status = 200): Response {
 	});
 }
 
+/** Render a page and attach a strict CSP built around its per-response nonce.
+ * No third-party script/style/img/connect sources — these pages hold a fresh
+ * sync token, so a compromised CDN or injected script is a total compromise. */
+function htmlPage(page: RenderedPage, status = 200): Response {
+	const csp = [
+		"default-src 'none'",
+		`script-src 'nonce-${page.nonce}'`,
+		"style-src 'unsafe-inline'",
+		"img-src 'self' data:",
+		"connect-src 'self'",
+		"base-uri 'none'",
+		"form-action 'self'",
+	].join("; ");
+	return new Response(page.html, {
+		status,
+		headers: {
+			"Content-Type": "text/html; charset=utf-8",
+			"Cache-Control": "no-store",
+			"Content-Security-Policy": csp,
+		},
+	});
+}
+
 function isValidHash(hash: string): boolean {
 	return /^[0-9a-f]{64}$/.test(hash);
 }
@@ -101,6 +125,25 @@ function getHttpAuthToken(req: Request): string | null {
 	return token || null;
 }
 
+/**
+ * Header auth is tried first; the query-string fallback below is tracked
+ * debt (do not remove without a coordinated client change — see below).
+ *
+ * KNOWN RESIDUAL RISK: browsers' native WebSocket constructor cannot set
+ * custom headers, so the plugin's WS connections authenticate via `?token=`
+ * in the URL. With `[observability.logs] enabled` in wrangler.toml, that
+ * token lands in Cloudflare's own request-log storage — outside this
+ * application's control (wrangler.toml has no per-query-param redaction).
+ * Verified: no code in this server logs, traces, or persists the full
+ * request URL (only `.origin` / parsed search params), so the token cannot
+ * leak through anything WE write. The real fix is moving WS auth to the
+ * `Sec-WebSocket-Protocol` header, which the browser API does support — but
+ * y-partyserver's provider (see node_modules/y-partyserver/dist/provider)
+ * only exposes `params` (query string), not WS subprotocols, so this
+ * requires a coordinated change to the plugin's provider setup, not a
+ * server-only patch. Do not log/persist `req.url` anywhere without
+ * stripping the token first.
+ */
 function getSocketAuthToken(req: Request): string | null {
 	const headerToken = getHttpAuthToken(req);
 	if (headerToken) return headerToken;
@@ -120,9 +163,10 @@ function parseClientSchemaVersion(url: URL): { version: number; source: "query" 
 function parseSyncPath(pathname: string): { vaultId: string } | null {
 	const directMatch = pathname.match(/^\/vault\/sync\/([^/]+)$/);
 	if (directMatch) {
-		const [, vaultId] = directMatch;
-		if (vaultId) {
-			return { vaultId: decodeURIComponent(vaultId) };
+		const [, rawVaultId] = directMatch;
+		if (rawVaultId) {
+			const vaultId = decodeAndValidateVaultId(rawVaultId);
+			if (vaultId) return { vaultId };
 		}
 	}
 	return null;
@@ -131,10 +175,12 @@ function parseSyncPath(pathname: string): { vaultId: string } | null {
 function parseVaultPath(pathname: string): { vaultId: string; rest: string[] } | null {
 	const parts = pathname.split("/").filter(Boolean);
 	if (parts.length < 2 || parts[0] !== "vault") return null;
-	const vaultId = parts[1];
+	const rawVaultId = parts[1];
+	if (!rawVaultId) return null;
+	const vaultId = decodeAndValidateVaultId(rawVaultId);
 	if (!vaultId) return null;
 	return {
-		vaultId: decodeURIComponent(vaultId),
+		vaultId,
 		rest: parts.slice(2),
 	};
 }
@@ -279,7 +325,12 @@ async function isAuthorized(
 ): Promise<boolean> {
 	if (!token) return false;
 	if (state.mode === "env") {
-		return token === state.envToken;
+		// Compare digests, not raw strings — `===` on unequal-length strings is
+		// fast (no per-byte work), and V8's short-circuiting means a token that
+		// shares a long correct prefix runs measurably longer than one that
+		// doesn't. Hashing first makes both compared values fixed-length and
+		// removes any correlation between prefix match and comparison time.
+		return (await hashToken(token)) === (await hashToken(state.envToken));
 	}
 	if (state.mode === "claim") {
 		return (await hashToken(token)) === state.tokenHash;
@@ -368,6 +419,17 @@ async function recordVaultTrace(
 	} catch (err) {
 		console.warn(`${LOG_PREFIX} trace write failed:`, err);
 	}
+}
+
+/**
+ * Log an auth rejection WITHOUT touching per-vault storage. The vaultId in
+ * these paths comes straight from the URL before auth has succeeded, so
+ * recordVaultTrace's getServerByName() would wake/hydrate (and bill) a real
+ * Durable Object for every unauthenticated request — an attacker-controlled
+ * cost amplifier. This goes to Workers console logs only.
+ */
+function logRejection(vaultId: string, event: string, data: Record<string, unknown> = {}): void {
+	console.warn(`${LOG_PREFIX} ${event} vaultId=${JSON.stringify(vaultId).slice(0, 80)}`, data);
 }
 
 async function fetchVaultDocument(env: Env, vaultId: string): Promise<Uint8Array> {
@@ -691,7 +753,7 @@ const worker = {
 		const authState = await getAuthState(env);
 
 		if (req.method === "GET" && url.pathname === "/") {
-			const body = authState.claimed
+			const page = authState.claimed
 				? renderRunningPage({
 					host: url.origin,
 					authMode: authState.mode,
@@ -702,7 +764,7 @@ const worker = {
 					host: url.origin,
 					deployRepo: canonicalRepoForSetup(env),
 				});
-			return html(body);
+			return htmlPage(page);
 		}
 
 		if (req.method === "GET" && url.pathname === "/api/setup-status") {
@@ -717,7 +779,7 @@ const worker = {
 		}
 
 		if (req.method === "GET" && url.pathname === "/mobile-setup") {
-			return html(
+			return htmlPage(
 				renderMobileSetupPage({
 					host: url.origin,
 					deployRepo: canonicalRepoForSetup(env),
@@ -826,23 +888,17 @@ const worker = {
 			const token = getSocketAuthToken(req);
 			const clientSchema = parseClientSchemaVersion(url);
 			if (!authState.claimed) {
-				await recordVaultTrace(env, syncRoute.vaultId, "ws-rejected", {
-					reason: "unclaimed",
-				});
+				logRejection(syncRoute.vaultId, "ws-rejected", { reason: "unclaimed" });
 				const response = rejectSocket(req, "unclaimed");
 				return isWebSocketRequest(req) ? response : withCors(response);
 			}
 			if (authState.mode === "env" && !authState.envToken) {
-				await recordVaultTrace(env, syncRoute.vaultId, "ws-rejected", {
-					reason: "server_misconfigured",
-				});
+				logRejection(syncRoute.vaultId, "ws-rejected", { reason: "server_misconfigured" });
 				const response = rejectSocket(req, "server_misconfigured");
 				return isWebSocketRequest(req) ? response : withCors(response);
 			}
 			if (!(await isAuthorized(authState, token))) {
-				await recordVaultTrace(env, syncRoute.vaultId, "ws-rejected", {
-					reason: "unauthorized",
-				});
+				logRejection(syncRoute.vaultId, "ws-rejected", { reason: "unauthorized" });
 				const response = rejectSocket(req, "unauthorized");
 				return isWebSocketRequest(req) ? response : withCors(response);
 			}
@@ -904,7 +960,10 @@ const worker = {
 			}
 			markClientSeen(env, ctx);
 
-			const hubVaultId = decodeURIComponent(hubManagementMatch[1] ?? "");
+			const hubVaultId = decodeAndValidateVaultId(hubManagementMatch[1] ?? "");
+			if (!hubVaultId) {
+				return withCors(json({ error: "invalid hub vaultId" }, 400));
+			}
 			const subPath = hubManagementMatch[2] ?? "";
 			const subParam = hubManagementMatch[3];
 
@@ -920,7 +979,10 @@ const worker = {
 			}
 
 			if (subPath.startsWith("/spokes/") && subParam) {
-				const spokeVaultId = decodeURIComponent(subParam);
+				const spokeVaultId = decodeAndValidateVaultId(subParam);
+				if (!spokeVaultId) {
+					return withCors(json({ error: "invalid spoke vaultId" }, 400));
+				}
 				if (req.method === "DELETE") {
 					const hubStub = getHubRegistryStub(env, hubVaultId);
 					await hubStub.fetch(
@@ -961,7 +1023,7 @@ const worker = {
 
 		const token = getHttpAuthToken(req);
 		if (!authState.claimed) {
-			await recordVaultTrace(env, vaultRoute.vaultId, "http-rejected", {
+			logRejection(vaultRoute.vaultId, "http-rejected", {
 				reason: "unclaimed",
 				method: req.method,
 				path: url.pathname,
@@ -969,7 +1031,7 @@ const worker = {
 			return withCors(json({ error: "unclaimed" }, 503));
 		}
 		if (authState.mode === "env" && !authState.envToken) {
-			await recordVaultTrace(env, vaultRoute.vaultId, "http-rejected", {
+			logRejection(vaultRoute.vaultId, "http-rejected", {
 				reason: "server_misconfigured",
 				method: req.method,
 				path: url.pathname,
@@ -977,7 +1039,7 @@ const worker = {
 			return withCors(json({ error: "server_misconfigured" }, 503));
 		}
 		if (!(await isAuthorized(authState, token))) {
-			await recordVaultTrace(env, vaultRoute.vaultId, "http-unauthorized", {
+			logRejection(vaultRoute.vaultId, "http-unauthorized", {
 				method: req.method,
 				path: url.pathname,
 			});

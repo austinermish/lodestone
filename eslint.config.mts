@@ -58,5 +58,7 @@ export default tseslint.config(
 		"version-bump.mjs",
 		"versions.json",
 		"main.js",
+		"server/scripts",
+		"server/src/generated",
 	]),
 );

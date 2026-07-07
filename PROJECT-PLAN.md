@@ -113,6 +113,14 @@ Ship these as one or two patch releases before anything else.
 
 ## Phase 2 — Server security & hardening
 
+> **STATUS: EXECUTED 2026-07-06 as v3.1.0.** 2.1 shipped earlier in Batch A
+> (3.0.3). 2.2–2.5 and 2.7–2.10 shipped in this batch. **2.6 is intentionally
+> NOT fixed** — audited and documented as genuinely blocked (see its section
+> below); do not re-attempt as a quick patch without first forking/patching
+> y-partyserver's provider or hand-rolling the WS client. New regression
+> coverage: `tests/batch-b-security-regressions.mjs` (vaultId validation,
+> update-provider host-matching).
+
 ### 2.1 Spoke seeding silently fails for hub docs over ~100 KB
 - **Where:** `server/src/index.ts:588-604`
 - **Bug:** `btoa(String.fromCharCode(...hubDocBytes))` throws `RangeError` (V8 arg
@@ -152,9 +160,18 @@ Ship these as one or two patch releases before anything else.
 
 ### 2.6 Token in WS query string + observability logs
 - **Where:** `server/src/index.ts:104-108`; `server/wrangler.toml:25-26`
-- **Fix (near-term):** redact `?token=` from any URL that reaches logging/trace paths.
-  **Proper fix:** move WS auth to the `Sec-WebSocket-Protocol` header. Coordinate
-  with the plugin's provider connection code.
+- **STATUS (2026-07-06): audited, not fixed — genuinely blocked, not deferred out
+  of laziness.** Verified no server code logs/traces/persists the full request URL
+  (only `.origin` / parsed search params) — documented in a comment at
+  `getSocketAuthToken`. The real fix (`Sec-WebSocket-Protocol` header) is blocked
+  because `y-partyserver`'s provider (`node_modules/y-partyserver/dist/provider`)
+  only exposes `params` (query string) in its public API, not WS subprotocols —
+  this needs either a fork/patch of the provider or a hand-rolled WebSocket client
+  in the plugin, plus a server-side compatibility window (old plugin versions still
+  send `?token=`). Treat as a dedicated future item, not a quick patch. Interim
+  mitigation available if the risk feels live: disable `[observability.logs]` in
+  `server/wrangler.toml` (tradeoff: loses debugging visibility) — left to Austin's
+  call, not flipped automatically.
 
 ### 2.7 Setup page loads QR lib from CDN with no SRI/CSP
 - **Where:** `server/src/setupPage.ts:399` (script tag), token handling at `:505-530`

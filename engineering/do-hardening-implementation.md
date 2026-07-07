@@ -77,6 +77,19 @@ The room DO now handles these paths before the main document hydration path:
 This keeps observability and metadata requests cheap and prevents them from
 waking the full CRDT state just to answer a small diagnostic query.
 
+**Regression note (2026-07, fixed in v3.1.0):** this invariant had silently
+regressed — the handlers were in `onRequest()`, which `y-partyserver` only
+reaches *after* `onStart()` → `onLoad()` → `ensureDocumentLoaded()` has already
+run. Combined with unauthenticated auth-rejection paths calling into per-vault
+trace recording (see item 2.2), any unauthenticated request against a random
+vaultId fully hydrated a fresh Durable Object. The fix moved the three routes
+into the `fetch()` override, before `super.fetch(request)` — they now run
+before hydration is even attempted, and the rejection-path trace calls were
+also removed (see `logRejection` in `index.ts`, which never touches the DO).
+`readRoomMetaCheap()` and `recordTrace()` were already written to be
+hydration-independent (checking `this.documentLoaded` / touching only
+`this.ctx.storage`); only their call site needed to move.
+
 ## 5. Room metadata sidecar for schema admission
 
 Websocket schema admission no longer relies on fetching and decoding the full

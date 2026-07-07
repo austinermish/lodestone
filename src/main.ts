@@ -121,7 +121,15 @@ function applyReverseAlias(localPath: string, aliases: Record<string, string>): 
 	return localPath;
 }
 
-function buildGithubOpsBootstrapWorkflowYaml(): string {
+/**
+ * Pin the reusable workflow to a specific tag rather than @main. Every
+ * release is tagged with the plugin version (enforced by release.yml), so
+ * the running plugin's own version is always a valid, immutable ref — and
+ * self-hosters' generated ops workflows aren't handed write access to
+ * whatever the upstream default branch happens to contain at run time.
+ */
+function buildGithubOpsBootstrapWorkflowYaml(pinnedRef: string): string {
+	const safeRef = /^[A-Za-z0-9._-]+$/.test(pinnedRef) ? pinnedRef : "main";
 	return [
 		"name: Lodestone Server Ops",
 		"on:",
@@ -134,7 +142,7 @@ function buildGithubOpsBootstrapWorkflowYaml(): string {
 		"  contents: write",
 		"jobs:",
 		"  run:",
-		"    uses: austinermish/lodestone/.github/workflows/lodestone-ops-reusable.yml@main",
+		`    uses: austinermish/lodestone/.github/workflows/lodestone-ops-reusable.yml@${safeRef}`,
 		"    with:",
 		"      action: ${{ github.event.inputs.action }}",
 		"      version: ${{ github.event.inputs.version }}",
@@ -3988,7 +3996,13 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		if (!capabilities?.updateRepoUrl) return;
 
 		let changed = false;
-		if (!this.settings.updateRepoUrl.trim()) {
+		// Only auto-populate from a host we'd actually treat as github/gitlab —
+		// otherwise a malicious/misconfigured server could plant an arbitrary
+		// URL that later gets opened via "Open update action" with a trusted-
+		// looking label. Non-canonical hosts still work, just require the user
+		// to paste the URL themselves.
+		const inferredProvider = this.inferUpdateProvider(capabilities.updateRepoUrl);
+		if (!this.settings.updateRepoUrl.trim() && (inferredProvider === "github" || inferredProvider === "gitlab")) {
 			this.settings.updateRepoUrl = capabilities.updateRepoUrl;
 			changed = true;
 		}
@@ -4125,13 +4139,21 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * `hostname.includes("github.")` (the previous check) matches
+	 * "fakegithub.com" and "github.evil.com" — this update-action button opens
+	 * whatever URL is derived from the repo host with a label like "your
+	 * GitHub workflow", so a substring match is a phishing vector. Require an
+	 * exact match (or a subdomain of the canonical host) and https.
+	 */
 	private inferUpdateProvider(repoUrl: string | null | undefined): "github" | "gitlab" | "unknown" | null {
 		if (!repoUrl) return null;
 		try {
 			const parsed = new URL(repoUrl);
+			if (parsed.protocol !== "https:") return "unknown";
 			const host = parsed.hostname.toLowerCase();
-			if (host.includes("github.")) return "github";
-			if (host.includes("gitlab.")) return "gitlab";
+			if (host === "github.com" || host.endsWith(".github.com")) return "github";
+			if (host === "gitlab.com" || host.endsWith(".gitlab.com")) return "gitlab";
 			return "unknown";
 		} catch {
 			return null;
@@ -4245,7 +4267,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			this.settings.updateRepoBranch.trim() || this.serverCapabilities?.updateRepoBranch || "main",
 		);
 		const filename = encodeURIComponent(GITHUB_OPS_WORKFLOW_PATH);
-		const workflowValue = encodeURIComponent(buildGithubOpsBootstrapWorkflowYaml());
+		const workflowValue = encodeURIComponent(buildGithubOpsBootstrapWorkflowYaml(this.manifest.version));
 		return `${normalizedRepoUrl}/new/${branch}?filename=${filename}&value=${workflowValue}`;
 	}
 

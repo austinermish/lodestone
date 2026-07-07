@@ -1,6 +1,6 @@
 {
 	"name": "lodestone-server",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"private": true,
 	"description": "Cloudflare Worker server for Obsidian vault CRDT sync via y-partyserver",
 	"scripts": {
@@ -11,13 +11,14 @@
 	"dependencies": {
 		"fflate": "^0.8.2",
 		"partyserver": "0.3.2",
+		"qrcode": "^1.5.4",
 		"y-partyserver": "2.1.2",
 		"y-protocols": "^1.0.7",
 		"yjs": "^13.6.20"
 	},
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260518.1",
-		"wrangler": "4.92.0",
-		"typescript": "^5.8.3"
+		"typescript": "^5.8.3",
+		"wrangler": "4.92.0"
 	}
 }

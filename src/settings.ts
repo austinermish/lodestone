@@ -1023,13 +1023,23 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 			const updateActionUrl = updateState.updateActionUrl;
 			if (updateActionUrl) {
 				updateActions.createEl("button", { text: "Open update action" }).addEventListener("click", () => {
-					window.open(updateActionUrl, "_blank", "noopener");
+					confirmAction(
+						this.app,
+						"Open update action",
+						`This opens: ${updateActionUrl}`,
+						() => { window.open(updateActionUrl, "_blank", "noopener"); },
+					);
 				});
 			}
 			const bootstrapUrl = updateState.updateBootstrapUrl;
 			if (bootstrapUrl) {
 				updateActions.createEl("button", { text: "Initialize updater" }).addEventListener("click", () => {
-					window.open(bootstrapUrl, "_blank", "noopener");
+					confirmAction(
+						this.app,
+						"Initialize updater",
+						`This opens: ${bootstrapUrl}`,
+						() => { window.open(bootstrapUrl, "_blank", "noopener"); },
+					);
 				});
 			}
 		}

@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   run:
-    uses: austinermish/lodestone/.github/workflows/lodestone-ops-reusable.yml@main
+    uses: austinermish/lodestone/.github/workflows/lodestone-ops-reusable.yml@3.1.0
     with:
       action: ${{ github.event.inputs.action }}
       version: ${{ github.event.inputs.version }}
