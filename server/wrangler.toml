@@ -1,4 +1,4 @@
-name = "lodestone"
+name = "lodestone-cloudflare"
 main = "src/index.ts"
 compatibility_date = "2026-03-02"
 workers_dev = true
