@@ -15,6 +15,67 @@
 
 ---
 
+## Batch execution roadmap
+
+The 10 phases above are organized by *topic*; execution happens in **batches**,
+each shipped as its own tagged release. This section is the authoritative
+"where are we" index — read this first in a new session before touching any
+phase section below.
+
+**Strategy: sequential batches, not all-at-once.**
+- Most phases touch the same files (`main.ts`, `vaultSync.ts`, `diskMirror.ts`,
+  `server/src/index.ts`) — parallel implementation across phases would conflict
+  constantly.
+- Austin dogfoods each batch before the next one starts; one release per batch
+  isolates any regression to a small diff.
+- Severity ordering matters — Phase 1 (data-loss bugs) shipped first regardless
+  of the phases' numbering elsewhere.
+- Batches don't map 1:1 to phases — a batch is whatever ships together in one
+  release, and may combine parts of multiple phases (see table).
+
+| Batch | Version | Status | Scope (phase refs) |
+|---|---|---|---|
+| **A** | 3.0.4 | ✅ shipped 2026-07-06 | Phase 1 (1.1–1.10) critical data-loss fixes + 10.1 (js-yaml runtime bump). Regression suite: `tests/phase1-critical-fixes-regressions.mjs`. |
+| **B** | 3.1.0 | ✅ shipped 2026-07-06 | Phase 2 (2.2–2.10) server security — 2.1 shipped earlier as part of live-testing fixes in 3.0.3. **2.6 intentionally NOT fixed** (audited, genuinely blocked on a `y-partyserver` limitation — see Phase 2 section). Server redeploy was required for this one. Regression suite: `tests/batch-b-security-regressions.mjs`. |
+| **C** | 3.2.0 | ⏳ next — Austin is testing A+B first | Phase 4 rooms: 4.1 path filtering (privacy leak), 4.2 room-scoped tokens + 4.6a per-room server topology (**topology decision already made** — see 4.6a: each hub runs its own Worker, fully independent hub↔spoke relationships), 4.3 revert-loop, 4.4, 4.5, 4.6 room test suite. 4.6a's interim guardrails (join-consent modal, cross-server-join abort) already shipped in 3.0.3 as stopgaps — Batch C is the real fix (per-room credentials). |
+| D | 3.2.x | pending | Phase 8 test gaps (blobSync suite first — zero coverage on 1,320 lines) + Phase 9 release/docs hygiene incl. README revision (9.7). |
+| E | 3.3.0 | pending | Phase 6 main.ts decomposition (no behavior change intended; run full test suite after each extraction step, not just at the end). |
+| F | 3.4.0 | pending | Phase 7 remainder: settings redesign (7.15–7.24), first-run modal, R2 flow, quick-win copy. Several Phase 7 items already shipped opportunistically during live-testing sessions (claim-page resume + connection auto-detect, settings auto-refresh, invite-click routing fix, `workers_dev` default) — check each 7.x item against current code before re-implementing, some may already be done. |
+| G | 3.4.x | pending | Phase 5 perf items + Phase 10.2/10.3 (wrangler dev-dep bump, `dependabot.yml` — last, per Austin's explicit request). 10.1 (js-yaml) already shipped in Batch A. |
+
+**Between-batch fixes shipped opportunistically** (not in the original phase
+list, found during live dogfooding, already done — don't re-plan these):
+- Clicked room invites were misrouted into the setup flow (Obsidian overwrites
+  `params.action` with the registered protocol name) — fixed, route on `roomId`
+  presence instead.
+- Claim page had no recovery path if the browser tab closed before pairing a
+  device — added a localStorage-backed "Finish connecting a device" resume
+  section plus `/api/setup-status` polling so both the claim page and running
+  page auto-detect when a client connects.
+- Default Cloudflare Worker name changed to `lodestone-cloudflare` (was
+  `lodestone`, colliding visually with the repo name in the dashboard) —
+  `server/wrangler.toml` only; **does not rename existing deployed Workers** —
+  Durable Object storage is namespaced by Worker name, so a name change always
+  means a fresh Worker + manual data re-seed from disk, never an in-place update.
+
+**Answered questions worth remembering** (came up during Batch A/B testing,
+will likely come up again):
+- **The ~50 MB vault ceiling is raw markdown TEXT only, not attachments.**
+  Attachments go through content-addressed R2 (separate transport). A vault
+  that's mostly images/PDFs can be much larger; only the `.md` text total
+  counts toward the limit, and it's soft (CPU/memory degrade first, not a hard
+  wall). Rooms nuance: the monolithic Y.Doc covers the *hub's whole vault text*,
+  not just the shared folders.
+- **Local verification note**: `npm run test:ci` (which includes
+  `test:integration:worker`) hangs when run directly via the Bash tool on this
+  machine — `wrangler dev` binds its port fine but sandboxed `curl`/`fetch`
+  probes to `127.0.0.1` time out (looked like a proxy interference issue, not a
+  wrangler problem). Workaround used successfully: run with
+  `dangerouslyDisableSandbox: true`. CI (GitHub Actions) runs the same suite
+  without this issue — trust CI as the source of truth when local runs hang.
+
+---
+
 ## Phase 1 — Critical data-loss & correctness fixes (plugin core)
 
 > **STATUS: EXECUTED 2026-07-06 as v3.0.4** (all items 1.1–1.10, plus 10.1's
@@ -734,14 +795,10 @@ updates:
 
 ---
 
-## Suggested release sequencing
+## Release sequencing
 
-| Release | Contents |
-|---|---|
-| 2.6.2 (patch) | Phase 1.1–1.4 + 10.1 (js-yaml) |
-| 2.6.3 (patch) | Phase 1.5–1.10 |
-| 2.7.0 (minor) | Phase 2 (server security batch — server redeploy required) |
-| **3.0.0** | **Phase 3 rename to Lodestone** (+ migration shim) |
-| 3.1.x | Phase 4 rooms fixes (4.1/4.2 may warrant their own minor) |
-| 3.2.x | Phases 5–7 incrementally (decomposition commits carry no user-facing change; batch with UX items) |
-| ongoing | Phases 8–10 alongside |
+Superseded by the **Batch execution roadmap** near the top of this document —
+that table has the real shipped versions and current status. (This section
+originally proposed a pre-rename sequence starting at 2.6.2; reality diverged
+once the rename shipped clean as 3.0.0 and Batch A/B landed as 3.0.4/3.1.0.
+Kept only as a historical note — do not follow this table.)
