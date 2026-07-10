@@ -37,11 +37,12 @@ phase section below.
 |---|---|---|---|
 | **A** | 3.0.4 | ✅ shipped 2026-07-06 | Phase 1 (1.1–1.10) critical data-loss fixes + 10.1 (js-yaml runtime bump). Regression suite: `tests/phase1-critical-fixes-regressions.mjs`. |
 | **B** | 3.1.0 | ✅ shipped 2026-07-06 | Phase 2 (2.2–2.10) server security — 2.1 shipped earlier as part of live-testing fixes in 3.0.3. **2.6 intentionally NOT fixed** (audited, genuinely blocked on a `y-partyserver` limitation — see Phase 2 section). Server redeploy was required for this one. Regression suite: `tests/batch-b-security-regressions.mjs`. |
-| **C** | 3.2.0 | ⏳ next — Austin is testing A+B first | Phase 4 rooms: 4.1 path filtering (privacy leak), 4.2 room-scoped tokens + 4.6a per-room server topology (**topology decision already made** — see 4.6a: each hub runs its own Worker, fully independent hub↔spoke relationships), 4.3 revert-loop, 4.4, 4.5, **4.7 new-file live-editing delay in rooms (needs investigation first — see 4.7, root cause unconfirmed)**, 4.8 (UX-only, low priority), 4.6 room test suite. 4.6a's interim guardrails (join-consent modal, cross-server-join abort) already shipped in 3.0.3 as stopgaps — Batch C is the real fix (per-room credentials). |
-| D | 3.2.x | pending | Phase 8 test gaps (blobSync suite first — zero coverage on 1,320 lines) + Phase 9 release/docs hygiene incl. README revision (9.7). |
-| E | 3.3.0 | pending | Phase 6 main.ts decomposition (no behavior change intended; run full test suite after each extraction step, not just at the end). |
-| F | 3.4.0 | pending | Phase 7 remainder: settings redesign (7.15–7.24), first-run modal, R2 flow, quick-win copy. Several Phase 7 items already shipped opportunistically during live-testing sessions (claim-page resume + connection auto-detect, settings auto-refresh, invite-click routing fix, `workers_dev` default) — check each 7.x item against current code before re-implementing, some may already be done. |
-| G | 3.4.x | pending | Phase 5 perf items + Phase 10.2/10.3 (wrangler dev-dep bump, `dependabot.yml` — last, per Austin's explicit request). 10.1 (js-yaml) already shipped in Batch A. |
+| **C** | 3.2.0 | ✅ shipped 2026-07-10 | Phase 4 rooms, the fixable-without-a-new-feature subset: **4.3 revert loop (turned out to be 3 bugs — see 4.3, the fire-and-forget propagation fix is probably the bigger win)**, **4.4** setVaultMode race (blocking dependency for testing 4.3), **4.1 privacy leak** (fixed at the entry gate, not via `buildFilteredUpdate`), **4.5 investigated and deliberately deferred** (both plan-suggested fixes checked against real Yjs internals and found unsafe/ineffective — documented, not attempted), **4.7 diagnosed** (manual latency probe post-4.3-fix shows consistent ~150ms server-side propagation — the 4.3 fire-and-forget bug is the leading suspect for Austin's 15s delay; needs re-test to confirm), 4.8 already closed via README (no code change needed). Partial 4.6 room test suite (seeding, revert-loop, orphan-content-leak — 3 of ~5 planned scenarios; echo-suppression and 2.5.x ghost-file scenarios still open, folded into Batch C2). |
+| **C2** | 3.3.0 | pending — split out from C, see below | **4.2 room-scoped tokens + 4.6a per-room server topology** — the topology decision is made (each hub runs its own Worker, fully independent hub↔spoke relationships; interim guardrails already shipped in 3.0.3) but the actual implementation is a genuinely large, security-sensitive feature: `RoomConfig` gains host/token, a new server endpoint mints room-scoped credentials, client-side routing sends each room's VaultSync/DiskMirror/blob traffic to its own server, plus settings UI. Deliberately NOT compressed into Batch C's timeframe — a security-sensitive auth feature deserves its own dedicated pass, not leftover time after three unplanned bug discoveries. Round out 4.6's remaining test scenarios (echo suppression, 2.5.x ghost-file cases) alongside it. |
+| D | 3.3.x | pending | Phase 8 test gaps (blobSync suite first — zero coverage on 1,320 lines) + Phase 9 release/docs hygiene incl. README revision (9.7). |
+| E | 3.4.0 | pending | Phase 6 main.ts decomposition (no behavior change intended; run full test suite after each extraction step, not just at the end). |
+| F | 3.5.0 | pending | Phase 7 remainder: settings redesign (7.15–7.24), first-run modal, R2 flow, quick-win copy. Several Phase 7 items already shipped opportunistically during live-testing sessions (claim-page resume + connection auto-detect, settings auto-refresh, invite-click routing fix, `workers_dev` default) — check each 7.x item against current code before re-implementing, some may already be done. |
+| G | 3.5.x | pending | Phase 5 perf items + Phase 10.2/10.3 (wrangler dev-dep bump, `dependabot.yml` — last, per Austin's explicit request). 10.1 (js-yaml) already shipped in Batch A. |
 
 **Between-batch fixes shipped opportunistically** (not in the original phase
 list, found during live dogfooding, already done — don't re-plan these):
@@ -564,6 +565,35 @@ Treat 4.1–4.2 as security work.
 - **Not a hard limitation**: worth trying to fix. 15s is a client-side stall
   signature, not physics — do not tell users this is a permanent CRDT tradeoff
   without confirming the investigation above first.
+- **UPDATE 2026-07-10 (Batch C): the leading server-side suspect is now fixed
+  as a side effect of the 4.3 investigation — re-test before doing anything
+  else here.** 4.3 found `propagateCrossVault`'s hub→spoke fan-out
+  (`propagateHubToSpokes`) was fire-and-forget with nothing keeping it alive
+  once `onSave()` returned, and in the real runtime this background work
+  frequently never completed at all. That call is on the path for **every**
+  hub edit reaching a spoke, not just the originally-scoped structural-
+  rejection case — a very plausible full explanation for 15-second-plus
+  delays before a spoke sees a hub's edits. Now properly awaited (same fix as
+  4.3). Diagnostic measurement after the fix
+  (`tests/manual/room-new-file-latency-check.mjs`, not wired into CI — a
+  manual timing probe, not a pass/fail test): hub creates a brand-new file and
+  makes 7 subsequent content edits to it while a spoke is already connected;
+  **every single one — the structural create AND every content edit —
+  propagated to the spoke in a consistent ~150-160ms**, matching the
+  100ms `debounceWait` + network round-trip almost exactly, with zero
+  variance and zero multi-second stalls observed. That measurement is
+  server-only (a raw Yjs client over WebSocket, no Obsidian plugin involved),
+  so it can't rule out the OTHER original hypothesis (the plugin-side
+  editor-binding/1.5-disk-reseed-guard race) — but it strongly suggests the
+  server was the actual bottleneck Austin hit.
+- **Next step, in order**: (1) Austin re-tests the exact original scenario
+  (hub creates file in shared folder, spoke opens and types immediately) on
+  this release. (2) If the delay is gone: close this item, no plugin-side
+  work needed. (3) If the delay persists: the server is now proven fast, so
+  the investigation should pivot entirely to the plugin's editor-binding path
+  (the original "leading hypothesis" above) — trace-log reproduction on both
+  devices is still the right tool, but the server-side propagation timeline
+  no longer needs to be part of what's captured.
 
 ### 4.8 Spoke-created files never propagate, with no user-visible signal *(added 2026-07-08, confirmed-intended behavior)*
 - **Observed (Austin)**: a spoke creating a file in the shared folder does not
