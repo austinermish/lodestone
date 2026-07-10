@@ -341,15 +341,61 @@ The rooms feature has the highest defect density (consistent with 2.5.x history)
 Treat 4.1–4.2 as security work.
 
 ### 4.1 `buildFilteredUpdate` pass-through → cross-vault content leak
-- **Where:** `server/src/server.ts:607-615`; fan-out at `:299-308, 575-583`
-- **Bug:** `_knownPaths` is ignored; body edits to spoke-private files (pre-existing
-  in the spoke, so never structurally rejected) merge into the hub doc as orphan
-  structs and fan out to every other spoke — recoverable from any spoke's document
-  endpoint. Also unbounded hub-doc growth.
-- **Fix:** implement real path filtering: decode the update, drop ops targeting
-  Y.Text instances whose fileId is not in the room's known-path set, re-encode.
-  Until implemented, document loudly (yaos.md/lodestone.md + room UI) that spoke
-  content is not isolated.
+- **STATUS: PARTIALLY FIXED 2026-07-10 (Batch C, v3.2.0) — the actual leak vector
+  closed at the point of entry; `buildFilteredUpdate` itself intentionally left
+  as a documented pass-through (see below for why).**
+- **What the finding actually described**: a body edit (content-only, touches
+  only a Y.Text's own internal structure, not the containing map's keys) to a
+  fileId with no LIVE hub-known meta entry passes `updateTouchesStructure`
+  unconditionally — since it never touches pathToId/meta/idToText map keys at
+  all — merges into the hub doc as an untracked orphan, and gets fanned out to
+  every other spoke regardless of whether the hub considers that file part of
+  the shared room.
+- **Fix implemented — reject at the gate, not filter after the fact.** Rather
+  than attempting to construct a byte-level "filtered subset" of a mixed
+  update (see why that's risky, below), added a new detection method
+  `findContentTouchedFileIds` (server.ts) that replays an incoming spoke
+  update on a seeded probe and reports which existing Y.Text instances (by
+  fileId, via reverse object-identity lookup) had their body touched. In
+  `apply-spoke-update`, right after the existing structural check: for each
+  content-touched fileId, if the hub's own `meta` map has no entry for it, or
+  that entry is missing a string `path`, or it's tombstoned (new
+  `isMetaTombstoned` helper covering both the legacy and v2 tombstone
+  shapes) — reject the WHOLE update (`reason: "unknown-file-not-shared"`),
+  same allow/reject pattern as the existing structural-change gate. This
+  benefits from the same-day 4.3 fixes (revert-on-rejection now actually
+  works; propagation is now properly awaited), and is a binary allow/reject
+  decision using only the already-proven-safe replay-into-a-clone technique —
+  no struct-level surgery.
+- **`buildFilteredUpdate` (the fan-out filter) is left as a documented
+  pass-through, NOT because the leak is unfixed, but because the leak's entry
+  point is now closed upstream.** Investigated implementing real per-path
+  filtering (drop ops for unknown fileIds, re-encode a subset update) and
+  concluded it's not safely achievable as a quick patch: constructing a VALID
+  partial Yjs update either requires raw struct-level manipulation (same
+  unstable-internals risk documented under 4.5), or — the only public-API-safe
+  alternative — reconstructing allowed entries as brand-new Y.Text objects in
+  a fresh temp doc, which would REPLACE (not incrementally patch) any
+  existing Y.Text a recipient already has under that key, silently discarding
+  the recipient's own concurrent local edits to that same file. That's a
+  worse correctness bug than the filter is meant to prevent. Revisit only with
+  a real design for incremental, struct-safe partial-update construction —
+  not as a follow-up patch.
+- **Residual scope, still open**: `buildFilteredUpdate`'s hub→spoke and
+  spoke-merge→other-spokes fan-out paths still forward the full delta
+  (unfiltered) for updates that DO pass both gates (structural + the new
+  content-ownership check) — meaning a spoke that legitimately has access to
+  file A's content still sees hub-doc growth/traffic for file A's edits
+  originating from contexts it's not itself part of, IF such a scenario can
+  arise. Given the entry-point fix above, the specific "orphan content
+  visible to other spokes" leak is closed; this residual is a scope/traffic
+  concern, not a content-privacy one, matching the "unbounded hub-doc growth"
+  half of the original finding — still open, tracked here.
+- **Regression test**: `tests/room-orphan-content-leak-regression.mjs` — seeds
+  the hub with an orphan idToText/pathToId entry with no meta, confirms a
+  spoke legitimately receives it via the (unfiltered) initial seed, has the
+  spoke edit its body, and asserts the hub rejects the edit and its own
+  document is unmodified by it.
 
 ### 4.2 Room invites embed the vault-wide server token
 - **Where:** `src/settings.ts:717-729` (`buildRoomInviteUrl`); rooms reuse
@@ -363,22 +409,93 @@ Treat 4.1–4.2 as security work.
   full-server access.
 
 ### 4.3 Structural-rejection revert loop
-- **Where:** `server/src/server.ts:257-266, 559-571, 687-731`
-- **Risk:** slow save chain → spoke's debounced `onSave` echoes hub-originated
-  structural changes → hub rejects → `revertRejectedStructuralChange` soft-deletes a
-  hub-created file → revert generates a fresh structural delta → livelock.
-- **Fix:** track the state vector of the last cross-vault apply and exclude that
-  range from propagation. **First write the regression test**: delay `appendUpdate`
-  and assert the echoed hub delta is never re-proposed.
+- **STATUS: FIXED 2026-07-10 (Batch C, v3.2.0) — turned out to be three bugs, not one.**
+  Investigating the originally-scoped livelock surfaced two more severe latent
+  bugs in the same code path; all three are fixed together:
+  1. **The livelock as scoped**: `_applyingCrossVaultUpdate` is reset to `false`
+     synchronously right after `revertRejectedStructuralChange`'s
+     `document.transact()` returns, but `onSave()` only runs on a DEBOUNCED
+     timer (`static callbackOptions = { debounceWait: 100, debounceMaxWait: 500 }`
+     in `server.ts`) — by the time it fires, the flag is long since clear, so
+     the revert's own delta looked like a fresh local edit and got
+     re-proposed to the hub, rejected again, reverted again, forever (fresh
+     `deletedAt` each cycle). **Fixed** with a new `_lastRevertStateVector`
+     field: set immediately after any revert transaction, checked-and-cleared
+     once in `onSave()` — if the document hasn't moved since the last revert,
+     this delta *is* that revert and must not be re-proposed.
+  2. **Bigger latent bug found while testing #1: the revert almost never ran
+     at all.** `propagateCrossVault`'s cross-vault work (`propagateSpokeToHub`,
+     then `revertRejectedStructuralChange` on rejection, plus the hub's
+     `propagateHubToSpokes` fan-out) was fire-and-forget
+     (`void promise.catch(...)`) with nothing holding it alive once `onSave()`
+     returned — in the actual Miniflare/workerd runtime, that background work
+     frequently never completed. **This meant a spoke's rejected structural
+     change was silently never rolled back in its own CRDT** — worse than the
+     livelock, and a plausible contributor to 4.7's live-editing delay too
+     (background propagation work not reliably completing promptly). **Fixed**:
+     `propagateCrossVault` now properly `await`s the whole chain — bridge call,
+     revert, and hub fan-out — matching the pattern `enqueueSave` already used
+     correctly.
+  3. **Root cause of why the revert (once it did run) always no-op'd**:
+     `extractStructuralKeys` clones `this.document`'s CURRENT state before
+     replaying the delta — correct for the hub inspecting a *foreign* delta it
+     hasn't merged yet, but `revertRejectedStructuralChange` calls it against
+     the SPOKE's own document, which already has that delta merged in (via
+     normal WS sync, before `onSave` ever runs). Replaying an already-applied
+     delta onto a clone of state that already contains it detects zero
+     changes — the revert's early-return (`touched.*.size === 0`) fired every
+     time. **Fixed**: `extractStructuralKeys` takes a
+     `seedWithCurrentDocument` param (default `true`, unchanged behavior for
+     the hub's `updateTouchesStructure` check); `revertRejectedStructuralChange`
+     now passes `false` (bare empty probe), which correctly detects touched
+     keys for a delta that's the *reverting document's own* already-merged change.
+- **Regression test**: `tests/room-revert-loop-regression.mjs` — a spoke makes
+  a structural change over a real WS connection, waits multiple debounce
+  cycles, and asserts (a) the change is actually reverted/tombstoned, (b) the
+  tombstone's `deletedAt` is stable across a second wait window (no loop), and
+  (c) exactly one `spoke-structural-change-reverted` trace event was recorded
+  (not a growing count). All three would have caught the pre-fix bugs.
 
 ### 4.4 `setVaultMode` fire-and-forget at registration
 - **Where:** `server/src/index.ts:581-583`
 - **Fix:** await it; fail registration loudly if the mode write fails.
 
 ### 4.5 Per-update full-document clone in the spoke gate
-- **Where:** `server/src/server.ts:631-670` (`extractStructuralKeys`)
-- **Fix:** cache one probe doc per burst, or inspect the update's target parents via
-  `Y.decodeUpdate` instead of full replay. Matters at the 50 MB vault target.
+- **STATUS: INVESTIGATED 2026-07-10, DEFERRED — not a safe fix within Batch C's
+  risk budget.** Where: `server/src/server.ts` `extractStructuralKeys`
+  (renumbered from the plan's original 631-670 during the 4.3 refactor; still
+  the same function).
+- **Option (a) from the plan — "cache one probe doc per burst" — does not
+  actually help.** The expensive part is `Y.encodeStateAsUpdate(this.document)`,
+  and the realistic hot path this item worries about is an actively-editing
+  spoke sending rapid debounced updates — the document changes with *every*
+  one of those updates (the previous edit just got merged in), so a
+  state-vector-keyed cache would miss on every single call in exactly the
+  scenario that matters. Confirmed via code reading, not assumed.
+- **Option (b) — decode the update's raw structure via `Y.decodeUpdate`
+  instead of replaying into a clone — would genuinely fix the scaling
+  problem, but is NOT safely implementable as a quick patch.** Checked Yjs's
+  internals directly (`node_modules/yjs/dist/src/structs/Item.d.ts` and the
+  update-decode path in `yjs.cjs`): a freshly-decoded, not-yet-integrated
+  `Item`'s `.parent` field is not a ready-to-use string/type reference — it
+  goes through "parentInfo" resolution as part of Yjs's internal
+  integration/transaction machinery (`cantCopyParentInfo` bit-flag handling,
+  etc.), which is not a stable public API. Reimplementing that resolution
+  ourselves to answer "which root-level map does this struct belong to"
+  without integrating into a real document risks a subtly wrong structural-
+  change classifier — which is a **security** regression here (a missed
+  structural change slips through unfiltered to the hub), not just a
+  performance one. Not worth the risk without much more dedicated time to
+  validate against Yjs's own integration semantics.
+- **Left as-is for now.** The replay-into-a-clone approach is correct and
+  already only runs once per incoming spoke update (confirmed: exactly one
+  `extractStructuralKeys(updateBytes)` call per `apply-spoke-update` request,
+  via `updateTouchesStructure`; the revert path's `extractStructuralKeys(delta,
+  false)` added in 4.3 is unseeded and cheap). Genuinely matters only as hub
+  vaults approach the ~50 MB target with an actively-editing spoke — revisit
+  with a dedicated investigation (ideally with Yjs upstream guidance or a
+  differential test suite comparing decode-based vs. replay-based verdicts
+  across many structural/non-structural cases) rather than as a quick patch.
 
 ### 4.6a Per-room server credentials / multi-server topology *(added 2026-07-06 from live testing)*
 - **Today**: rooms are pinned to the vault's single connection (`settings.host`/`token`).

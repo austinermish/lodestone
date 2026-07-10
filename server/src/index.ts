@@ -619,21 +619,35 @@ async function listHubSpokes(env: Env, hubVaultId: string): Promise<SpokeEntry[]
 	}
 }
 
+/**
+ * Returns whether the mode write actually landed. Callers that need the mode
+ * change to be visible before the next request (registration, spoke removal)
+ * must await this and fail loudly on false — a fire-and-forget call here
+ * previously let a freshly-registered spoke's DO answer a structural edit
+ * with its old ("standalone") mode, silently skipping the spoke->hub
+ * propagation this whole feature depends on.
+ */
 async function setVaultMode(
 	env: Env,
 	vaultId: string,
 	mode: "hub" | "spoke" | "standalone",
 	hubVaultId?: string,
-): Promise<void> {
+): Promise<boolean> {
 	try {
 		const stub = await getServerByName(env.LODESTONE_SYNC, vaultId);
-		await stub.fetch("https://internal/__lodestone/set-mode", {
+		const res = await stub.fetch("https://internal/__lodestone/set-mode", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ mode, hubVaultId }),
 		});
+		if (!res.ok) {
+			console.warn(`${LOG_PREFIX} set-mode rejected (${res.status}) for ${vaultId}`);
+			return false;
+		}
+		return true;
 	} catch (err) {
 		console.warn(`${LOG_PREFIX} set-mode failed for ${vaultId}:`, err);
+		return false;
 	}
 }
 
@@ -668,10 +682,19 @@ async function handleHubSpokeRegister(
 		return json({ error: "registration failed" }, 500);
 	}
 
-	// Set the spoke vault's mode to "spoke"
-	void setVaultMode(env, spokeVaultId, "spoke", hubVaultId);
+	// Set the spoke vault's mode to "spoke" — awaited: a client that connects
+	// to the spoke's DO the instant this request returns must see the new mode
+	// immediately, or its structural-change propagation checks silently no-op
+	// against a stale "standalone" mode.
+	const spokeModeOk = await setVaultMode(env, spokeVaultId, "spoke", hubVaultId);
+	if (!spokeModeOk) {
+		return json({ error: "failed to set spoke mode" }, 500);
+	}
 	// Ensure the hub vault's mode is "hub"
-	void setVaultMode(env, hubVaultId, "hub");
+	const hubModeOk = await setVaultMode(env, hubVaultId, "hub");
+	if (!hubModeOk) {
+		return json({ error: "failed to set hub mode" }, 500);
+	}
 
 	// Fetch hub's current Y-Doc state and seed the spoke's DO immediately,
 	// so the spoke client receives content as soon as it connects via WebSocket.
@@ -989,8 +1012,14 @@ const worker = {
 						`https://internal/__lodestone/hub/spokes/${encodeURIComponent(spokeVaultId)}`,
 						{ method: "DELETE" },
 					);
-					// Reset the spoke vault's mode to standalone
-					void setVaultMode(env, spokeVaultId, "standalone");
+					// Reset the spoke vault's mode to standalone. Awaited so the mode
+					// change is visible before this response returns, but removal from
+					// the registry (above) already succeeded either way — a failure
+					// here doesn't need to fail the whole DELETE.
+					const resetOk = await setVaultMode(env, spokeVaultId, "standalone");
+					if (!resetOk) {
+						console.warn(`${LOG_PREFIX} could not reset mode for removed spoke ${spokeVaultId}`);
+					}
 					return withCors(json({ ok: true }));
 				}
 			}

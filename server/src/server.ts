@@ -56,6 +56,14 @@ type SyncMode = "hub" | "spoke" | "standalone" | "hub+spoke";
 const MODE_STORAGE_KEY = "syncMode";
 const HUB_VAULT_ID_STORAGE_KEY = "hubVaultId";
 
+/** True if a meta entry represents a tombstoned (deleted) file, in either the
+ * legacy ({deleted, deletedAt, mtime}) or v2 ({path, deletedAt}) shape. */
+function isMetaTombstoned(meta: unknown): boolean {
+	if (!meta || typeof meta !== "object") return true;
+	const m = meta as Record<string, unknown>;
+	return m.deleted === true || typeof m.deletedAt === "number";
+}
+
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 	if (a.byteLength !== b.byteLength) return false;
 	for (let i = 0; i < a.byteLength; i++) {
@@ -102,6 +110,19 @@ export class VaultSyncServer extends YServer {
 	private _modeLoaded = false;
 	/** True while applying a cross-vault update — prevents echo propagation in onSave. */
 	private _applyingCrossVaultUpdate = false;
+	/**
+	 * State vector immediately after the most recent revertRejectedStructuralChange()
+	 * transaction. onSave()'s debounce (100 ms) fires well after
+	 * _applyingCrossVaultUpdate has already been reset to false in that call's
+	 * `finally`, so the flag alone can't stop the revert's own delta from being
+	 * re-proposed to the hub — which would reject it again, trigger another
+	 * revert, and loop forever (each cycle stamping a fresh deletedAt). Checked
+	 * (and cleared) once in onSave(): if nothing else has changed the document
+	 * since the revert, this onSave's delta IS the revert and must not be
+	 * re-propagated. Y state vectors only move forward, so once this fails to
+	 * match it can never match again — safe to clear unconditionally after one check.
+	 */
+	private _lastRevertStateVector: Uint8Array | null = null;
 
 	async onLoad(): Promise<void> {
 		await this.ensureDocumentLoaded();
@@ -124,8 +145,16 @@ export class VaultSyncServer extends YServer {
 		await this.enqueueSave(delta, persistedStateVector);
 		await this.syncRoomMetaFromDocument();
 
+		// Check-and-clear: if the document hasn't moved since the most recent
+		// revert, this delta IS that revert — never re-propose it (see the
+		// field comment on _lastRevertStateVector for why the boolean flag
+		// alone can't catch this across the debounce gap).
+		const revertSv = this._lastRevertStateVector;
+		this._lastRevertStateVector = null;
+		const isPureRevertEcho = revertSv !== null && equalBytes(revertSv, persistedStateVector);
+
 		// Cross-vault propagation — only for updates that did NOT come from a cross-vault apply.
-		if (!this._applyingCrossVaultUpdate) {
+		if (!this._applyingCrossVaultUpdate && !isPureRevertEcho) {
 			await this.propagateCrossVault(delta, this.getRoomId());
 		}
 	}
@@ -271,6 +300,36 @@ export class VaultSyncServer extends YServer {
 					rejected: true,
 					reason: "structural-change-not-permitted",
 				});
+			}
+
+			// Privacy leak (4.1): a body edit to a fileId with no live,
+			// hub-known meta entry — e.g. a stale fileId a spoke still has
+			// locally, or one only ever present in that spoke's own copy of
+			// the room doc — never touches pathToId/meta/idToText map keys,
+			// so it passes the structural check above. Left unchecked, its
+			// content would merge into the hub doc as an untracked orphan
+			// and still get fanned out to every other spoke. Reject it the
+			// same way as a structural change.
+			const contentTouchedIds = this.findContentTouchedFileIds(updateBytes);
+			if (contentTouchedIds.size > 0) {
+				const metaMap = this.document.getMap<Record<string, unknown>>("meta");
+				let hasUnknownFile = false;
+				for (const fileId of contentTouchedIds) {
+					const meta = metaMap.get(fileId);
+					if (!meta || typeof meta.path !== "string" || isMetaTombstoned(meta)) {
+						hasUnknownFile = true;
+						break;
+					}
+				}
+				if (hasUnknownFile) {
+					await this.recordTrace("spoke-unknown-file-edit-rejected", { originVaultId });
+					return json({
+						ok: true,
+						applied: false,
+						rejected: true,
+						reason: "unknown-file-not-shared",
+					});
+				}
 			}
 
 			// Filter: build a temporary doc from the spoke update, then extract only
@@ -588,19 +647,33 @@ export class VaultSyncServer extends YServer {
 		return this._mode;
 	}
 
+	/**
+	 * All cross-vault work here is AWAITED, not fire-and-forget. A bare
+	 * `void promise.catch(...)` kicked off from onSave() has nothing left
+	 * holding it alive once onSave() (and the debounced document-update
+	 * listener that called it) returns — in practice the bridge call and any
+	 * follow-up (specifically the structural-change revert) frequently never
+	 * ran to completion at all, not just raced against the next debounce
+	 * cycle. That meant a spoke's rejected structural change was silently
+	 * never rolled back in its own CRDT, on top of the revert-loop risk this
+	 * method also guards against (see _lastRevertStateVector). Awaiting here
+	 * is safe: onSave()'s own caller (the base class's debounced listener)
+	 * already awaits onSave() and only logs on failure.
+	 */
 	private async propagateCrossVault(delta: Uint8Array, originVaultId: string): Promise<void> {
 		if (!this._modeLoaded) await this.loadMode();
 		const env = this.env as ServerEnv;
 
 		// Spoke direction: propagate changes up to the hub.
 		if ((this._mode === "spoke" || this._mode === "hub+spoke") && this._hubVaultId) {
-			void propagateSpokeToHub(env, originVaultId, this._hubVaultId, delta).then((result) => {
-				if (result.rejected) {
-					void this.revertRejectedStructuralChange(delta).catch((err) => {
-						console.error(`${LOG_PREFIX} failed to revert rejected structural change:`, err);
-					});
+			const bridgeResult = await propagateSpokeToHub(env, originVaultId, this._hubVaultId, delta);
+			if (bridgeResult.rejected) {
+				try {
+					await this.revertRejectedStructuralChange(delta);
+				} catch (err) {
+					console.error(`${LOG_PREFIX} failed to revert rejected structural change:`, err);
 				}
-			});
+			}
 		}
 
 		// Hub direction: fan out changes down to all connected spokes.
@@ -609,7 +682,7 @@ export class VaultSyncServer extends YServer {
 			if (spokes.length > 0) {
 				const filtered = this.buildFilteredUpdate(delta, this.getHubKnownPaths());
 				if (filtered && filtered.byteLength > 0) {
-					void propagateHubToSpokes(env, originVaultId, filtered, originVaultId, spokes);
+					await propagateHubToSpokes(env, originVaultId, filtered, originVaultId, spokes);
 				}
 			}
 		}
@@ -647,26 +720,42 @@ export class VaultSyncServer extends YServer {
 	}
 
 	/**
-	 * Replays `updateBytes` on a scratch clone of the current document and
-	 * reports which top-level keys of the vault-tree structure maps (pathToId,
-	 * meta, idToText) it touched. Edits to the body of an existing Y.Text never
-	 * show up here — only add/update/delete of a map *entry* does (file
-	 * create/rename/move/delete).
+	 * Replays `updateBytes` on a scratch probe doc and reports which top-level
+	 * keys of the vault-tree structure maps (pathToId, meta, idToText) it
+	 * touched. Edits to the body of an existing Y.Text never show up here —
+	 * only add/update/delete of a map *entry* does (file create/rename/move/
+	 * delete).
 	 *
-	 * The clone MUST be seeded with the real document's current state before
-	 * replay: `updateBytes` is a delta relative to a state vector, not a full
-	 * snapshot, so an update that overwrites an existing key (e.g. a rename,
-	 * which rewrites `meta`'s path field) references a predecessor item that
-	 * only exists in the real document. Replaying against a bare empty Y.Doc
-	 * silently drops that item instead of registering it as a change.
+	 * `seedWithCurrentDocument` controls what the probe starts from, and
+	 * callers MUST pick correctly or this silently reports zero touched keys:
+	 *
+	 * - `true` (default) — seed the probe with `this.document`'s CURRENT
+	 *   state before replay. Required when `updateBytes` is a FOREIGN delta
+	 *   this document has not yet merged (the hub inspecting an incoming
+	 *   spoke update in `updateTouchesStructure`): a rename overwrites an
+	 *   existing key and references a predecessor item that only exists in
+	 *   the real document, so replaying against a bare empty doc would
+	 *   silently drop it instead of registering a change.
+	 * - `false` — replay against a bare empty doc. Required when
+	 *   `updateBytes` is THIS document's OWN delta that has already been
+	 *   merged into `this.document` (revertRejectedStructuralChange, always
+	 *   called on the vault that originated the change). Seeding with the
+	 *   current state there would clone a document that already contains
+	 *   every op in the delta, so replaying it again produces no detectable
+	 *   diff at all — every revert would silently no-op.
 	 */
-	private extractStructuralKeys(updateBytes: Uint8Array): {
+	private extractStructuralKeys(
+		updateBytes: Uint8Array,
+		seedWithCurrentDocument = true,
+	): {
 		pathToId: Set<string>;
 		meta: Set<string>;
 		idToText: Set<string>;
 	} {
 		const probeDoc = new Y.Doc();
-		Y.applyUpdate(probeDoc, Y.encodeStateAsUpdate(this.document));
+		if (seedWithCurrentDocument) {
+			Y.applyUpdate(probeDoc, Y.encodeStateAsUpdate(this.document));
+		}
 
 		const touched = {
 			pathToId: new Set<string>(),
@@ -701,6 +790,49 @@ export class VaultSyncServer extends YServer {
 		return touched;
 	}
 
+	/**
+	 * Replays `updateBytes` on a probe seeded with the current document and
+	 * reports which idToText fileIds had their Y.Text BODY (not the
+	 * containing map's keys) modified — i.e. ordinary content edits, the
+	 * complement of extractStructuralKeys. Uses a reverse lookup from live
+	 * Y.Text object identity to fileId, since idToText stores references.
+	 *
+	 * Needed because a body edit to a fileId with no live hub-known meta
+	 * entry (privacy leak 4.1: a stale/orphaned fileId a spoke still has
+	 * locally, or one only present in that spoke's copy of the room doc)
+	 * passes updateTouchesStructure — it never touches pathToId/meta/idToText
+	 * map keys — and would otherwise merge untracked content into the hub
+	 * doc that still gets fanned out to every other spoke.
+	 */
+	private findContentTouchedFileIds(updateBytes: Uint8Array): Set<string> {
+		const probeDoc = new Y.Doc();
+		Y.applyUpdate(probeDoc, Y.encodeStateAsUpdate(this.document));
+
+		const idToTextMap = probeDoc.getMap<Y.Text>("idToText");
+		const textToFileId = new Map<Y.Text, string>();
+		idToTextMap.forEach((text, fileId) => {
+			if (text instanceof Y.Text) textToFileId.set(text, fileId);
+		});
+
+		const touchedFileIds = new Set<string>();
+		const handler = (transaction: Y.Transaction) => {
+			for (const [type] of transaction.changedParentTypes) {
+				if (type instanceof Y.Text) {
+					const fileId = textToFileId.get(type);
+					if (fileId) touchedFileIds.add(fileId);
+				}
+			}
+		};
+		probeDoc.on("afterTransaction", handler);
+		try {
+			Y.applyUpdate(probeDoc, updateBytes);
+		} finally {
+			probeDoc.off("afterTransaction", handler);
+			probeDoc.destroy();
+		}
+		return touchedFileIds;
+	}
+
 	/** True if `updateBytes` adds/renames/moves/deletes a file or folder rather than just editing text. */
 	private updateTouchesStructure(updateBytes: Uint8Array): boolean {
 		const touched = this.extractStructuralKeys(updateBytes);
@@ -718,7 +850,9 @@ export class VaultSyncServer extends YServer {
 	 */
 	private async revertRejectedStructuralChange(delta: Uint8Array): Promise<void> {
 		await this.ensureDocumentLoaded();
-		const touched = this.extractStructuralKeys(delta);
+		// Unseeded: `delta` is this vault's OWN change, already merged into
+		// this.document — see extractStructuralKeys' doc comment.
+		const touched = this.extractStructuralKeys(delta, false);
 		if (touched.pathToId.size === 0 && touched.meta.size === 0 && touched.idToText.size === 0) {
 			return;
 		}
@@ -753,6 +887,10 @@ export class VaultSyncServer extends YServer {
 			});
 		} finally {
 			this._applyingCrossVaultUpdate = false;
+			// Recorded even if the transact() body no-ops (e.g. re-reverting an
+			// already-tombstoned key) — onSave's check-and-clear only needs the
+			// resulting state vector, not whether this call produced new bytes.
+			this._lastRevertStateVector = Y.encodeStateVector(this.document);
 		}
 
 		await this.recordTrace("spoke-structural-change-reverted", {
