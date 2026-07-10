@@ -37,7 +37,7 @@ phase section below.
 |---|---|---|---|
 | **A** | 3.0.4 | ✅ shipped 2026-07-06 | Phase 1 (1.1–1.10) critical data-loss fixes + 10.1 (js-yaml runtime bump). Regression suite: `tests/phase1-critical-fixes-regressions.mjs`. |
 | **B** | 3.1.0 | ✅ shipped 2026-07-06 | Phase 2 (2.2–2.10) server security — 2.1 shipped earlier as part of live-testing fixes in 3.0.3. **2.6 intentionally NOT fixed** (audited, genuinely blocked on a `y-partyserver` limitation — see Phase 2 section). Server redeploy was required for this one. Regression suite: `tests/batch-b-security-regressions.mjs`. |
-| **C** | 3.2.0 | ⏳ next — Austin is testing A+B first | Phase 4 rooms: 4.1 path filtering (privacy leak), 4.2 room-scoped tokens + 4.6a per-room server topology (**topology decision already made** — see 4.6a: each hub runs its own Worker, fully independent hub↔spoke relationships), 4.3 revert-loop, 4.4, 4.5, 4.6 room test suite. 4.6a's interim guardrails (join-consent modal, cross-server-join abort) already shipped in 3.0.3 as stopgaps — Batch C is the real fix (per-room credentials). |
+| **C** | 3.2.0 | ⏳ next — Austin is testing A+B first | Phase 4 rooms: 4.1 path filtering (privacy leak), 4.2 room-scoped tokens + 4.6a per-room server topology (**topology decision already made** — see 4.6a: each hub runs its own Worker, fully independent hub↔spoke relationships), 4.3 revert-loop, 4.4, 4.5, **4.7 new-file live-editing delay in rooms (needs investigation first — see 4.7, root cause unconfirmed)**, 4.8 (UX-only, low priority), 4.6 room test suite. 4.6a's interim guardrails (join-consent modal, cross-server-join abort) already shipped in 3.0.3 as stopgaps — Batch C is the real fix (per-room credentials). |
 | D | 3.2.x | pending | Phase 8 test gaps (blobSync suite first — zero coverage on 1,320 lines) + Phase 9 release/docs hygiene incl. README revision (9.7). |
 | E | 3.3.0 | pending | Phase 6 main.ts decomposition (no behavior change intended; run full test suite after each extraction step, not just at the end). |
 | F | 3.4.0 | pending | Phase 7 remainder: settings redesign (7.15–7.24), first-run modal, R2 flow, quick-win copy. Several Phase 7 items already shipped opportunistically during live-testing sessions (claim-page resume + connection auto-detect, settings auto-refresh, invite-click routing fix, `workers_dev` default) — check each 7.x item against current code before re-implementing, some may already be done. |
@@ -406,6 +406,59 @@ Treat 4.1–4.2 as security work.
   covering: seeding (incl. >200 KB docs, per 2.1), echo suppression, structural
   rejection/revert, spoke-private content isolation (per 4.1), ghost-file scenarios
   from the 2.5.x fix log.
+
+### 4.7 New-file live-editing delay in rooms *(added 2026-07-08 from live testing)*
+- **Symptom (Austin, hub↔spoke live test)**: hub creates a file in the shared
+  folder → spoke sees it appear immediately (structural CRDT maps sync fast, as
+  expected). Spoke opens it right away and starts typing. For **~15 seconds**,
+  neither side sees the other's typing reflected (asymmetric: spoke's typing
+  eventually appended onto the hub's buffer; hub's typing did not appear on
+  spoke's screen during the window). No live cursor for part of that window; it
+  appears later. Self-heals — after ~15s everything converges and stays correct.
+  **Files inherited at room-join time do NOT show this — only files created
+  after the room already exists.** That contrast is the important clue: this
+  points at something specific to *new-file binding in a room*, not a general
+  network/CRDT latency floor (a WS round-trip for a small delta should be tens
+  to low hundreds of ms, not 15s).
+- **Leading hypothesis (untested — needs trace-log reproduction, not confirmed):**
+  interaction between two things: (a) rooms route file binding through a
+  separate path from the main vault — `getBindingManagerForFile`/
+  `isRoomManagedPath` need the room's meta to have arrived before a newly
+  created file is even recognized as room-managed, and (b) the disk-reseed
+  guard added in **1.5** (`editorBinding.ts` — seeds from disk + calls `rebind`
+  when the open buffer's length looks implausible vs. the file's on-disk byte
+  size) is specifically likely to fire on a file in the first few seconds after
+  creation, when disk-write and incoming CRDT content are racing each other. If
+  it retriggers more than once before disk and CRDT settle, that could plausibly
+  chain into a multi-second stall — matching the "self-heals after a while, no
+  cursor until later" shape. This is a hypothesis to investigate, not a
+  confirmed diagnosis.
+- **Investigation plan**: reproduce with `debug: true` + trace logging on both
+  devices; capture the timeline of (room meta/pathToId arrival) vs. (diskMirror
+  write-queue drain / file-created-on-disk) vs. (editor bind/seed-mismatch/rebind
+  events from 1.5's guard) vs. (awareness/cursor broadcast) for a freshly created
+  room file. If 1.5's guard is retriggering repeatedly in that window, either
+  widen its size-plausibility tolerance for very-recently-created paths or gate
+  it off entirely for paths with no prior local content (nothing to leak yet).
+  If the room-binding-routing race is the actual cause instead, the fix belongs
+  with the Phase 6 `roomManager.ts` extraction (main.ts:3349-3658) — rooms need
+  to resolve "is this path room-managed" from meta/pathToId directly rather than
+  through whatever ordering happens to hold today.
+- **Not a hard limitation**: worth trying to fix. 15s is a client-side stall
+  signature, not physics — do not tell users this is a permanent CRDT tradeoff
+  without confirming the investigation above first.
+
+### 4.8 Spoke-created files never propagate, with no user-visible signal *(added 2026-07-08, confirmed-intended behavior)*
+- **Observed (Austin)**: a spoke creating a file in the shared folder does not
+  appear on the hub. **This matches the documented hub/spoke design exactly** —
+  structural changes (create/rename/move/delete) are host-only, rejected
+  server-side as `structural-change-not-permitted` (server.ts). Not a bug.
+- **Small UX gap worth closing eventually**: the rejected file just sits on the
+  spoke's local disk forever, unsynced, with no notice to the user that it will
+  never propagate. A future Phase 7 item: detect a locally-created file inside a
+  spoke's room-managed folder that never got a fileId assigned, and surface a
+  one-time notice ("Files created here don't sync — only the room host can add
+  files to this folder"). Low priority; doesn't block anything.
 
 ---
 
