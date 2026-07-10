@@ -459,6 +459,29 @@ Treat 4.1–4.2 as security work.
   spoke's room-managed folder that never got a fileId assigned, and surface a
   one-time notice ("Files created here don't sync — only the room host can add
   files to this folder"). Low priority; doesn't block anything.
+- **README updated** (2026-07-08) with a "Rooms" explainer section and FAQ
+  entries covering this exact question, so users hit the doc before filing a
+  "sync broken" issue.
+
+### 4.9 POTENTIAL FUTURE ADD (not committed): hub-configurable spoke permissions
+- **Idea (Austin, 2026-07-08)**: if host-only structural changes ever get
+  relaxed, add settings fields on the hub side to grant specific spokes
+  additional permissions per room — e.g. "this spoke may create/rename/delete
+  files in the shared folder." Explicitly **not decided or scheduled** — logged
+  here so the idea isn't lost, not as a plan commitment.
+- **Why it's non-trivial if pursued**: today exactly one actor (the hub) is
+  ever allowed to make structural changes, which is precisely what keeps
+  `runIntegrityChecks`' collision resolution (1.3) and the structural-rejection
+  guard (4.3) tractable — two structural writers immediately reopens the
+  concurrent-create-collision and revert-loop classes of bug this plan already
+  spent real effort closing. Any implementation would need: a per-spoke
+  permission bitmask stored in room state (not just the room config), an
+  auth check at the structural-update-rejection gate (`server.ts`, currently a
+  hard no rather than a permission lookup), settings UI on the hub's room-edit
+  modal to grant/revoke per spoke, and a redesign of the collision-resolution
+  logic in 1.3/4.3 for the multi-structural-writer case.
+- **Do not start this without an explicit go-ahead** — it's a meaningfully
+  larger scope than a settings-field add, given the above.
 
 ---
 

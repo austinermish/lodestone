@@ -60,6 +60,16 @@ Text sync works out of the box. To sync images, PDFs, and other attachments, add
 
 R2 also enables daily automatic snapshots and on-demand point-in-time backups. You can browse snapshots, diff against current state, and selectively restore individual files. If you skip R2, text sync still works perfectly — you just won't have attachment sync or snapshots.
 
+## Rooms — sharing folders across vaults
+
+Rooms let one vault (the **hub**) share specific folders with other vaults (**spokes**) in real time, without merging entire vaults together.
+
+- **Hub** — creates the room, picks which folders to share, and generates invite links/QR codes for spokes to join.
+- **Spoke** — joins via an invite link; the shared folders sync live onto that vault.
+- **Content editing is fully bidirectional** — hub and spokes both edit file content live, with real-time cursors, using the same CRDT engine as normal device sync.
+- **Structure is host-only** — creating, renaming, moving, or deleting files and folders inside a shared room is restricted to the hub. If a spoke creates a file in a shared folder, it stays local to that spoke's vault and does not sync anywhere else. This is a deliberate design choice (see [Origin](#origin)) that keeps folder structure authoritative and avoids conflicting structural edits arriving from multiple vaults at once. It's not a bug — see the FAQ below.
+- Today, each hub runs on its own Cloudflare Worker. A vault can be a spoke in someone else's room and a hub of its own room at the same time, on separate infrastructure.
+
 ## Updating your server
 
 Lodestone is designed to be zero-terminal, but because you own your infrastructure, you control when updates apply.
@@ -146,7 +156,7 @@ Access via command palette (Ctrl/Cmd+P):
 | **Reset local cache** | Clear IndexedDB, re-sync from server |
 | **Nuclear reset** | Wipe all CRDT state everywhere, re-seed from disk |
 
-## Troubleshooting
+## Troubleshooting & FAQ
 
 **"Unauthorized" errors**: Token mismatch between plugin and server. Check both match exactly.
 
@@ -159,6 +169,12 @@ Access via command palette (Ctrl/Cmd+P):
 **Files not syncing**: Check exclude patterns. Files over max size are skipped. Use debug logging to see what's happening, and then raise an issue on GitHub.
 
 **Conflicts after offline edits**: CRDTs merge automatically but the result depends on operation order. Review merged content if needed.
+
+**I created a file in a shared room folder on a spoke, but it never showed up on the hub or other spokes.** This is intended, not a bug — see [Rooms](#rooms--sharing-folders-across-vaults) above. Structural changes (new files, renames, moves, deletes) inside a room are host-only. The file exists locally on that spoke's vault but won't sync anywhere until it's created on the hub instead. Spoke-side structural permissions may become configurable in a future release — not built today.
+
+**Can spokes edit shared files in a room?** Yes, fully — real-time content editing and live cursors work in both directions between hub and spokes. Only *structural* changes (create/rename/move/delete) are host-only.
+
+**A brand-new file in a room takes a few seconds before live typing/cursors fully engage.** Known rough edge, being investigated. Files already present when you join a room sync instantly; a file created after that can show a short delay (up to ~15 seconds) before both sides see each other's live edits. It always resolves on its own and nothing is lost — just not smoothed over yet.
 
 ## Origin
 
