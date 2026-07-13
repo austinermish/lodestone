@@ -2,6 +2,7 @@ import { App, FuzzySuggestModal, Modal, Notice, PluginSettingTab, Setting, TFold
 import * as QRCode from "qrcode";
 import type VaultCrdtSyncPlugin from "./main";
 import { randomBase64Url } from "./utils/base64url";
+import { mintRoomToken } from "./sync/serverCapabilities";
 
 /** Controls how external disk edits (git, other editors) are imported into CRDT. */
 export type ExternalEditPolicy = "always" | "closed-only" | "never";
@@ -28,6 +29,18 @@ export interface RoomConfig {
 	 * before those files have a Y.Text entry.
 	 */
 	hubIncludePaths?: string[];
+	/**
+	 * This room's own server connection. Undefined means "use this vault's
+	 * main settings.host/settings.token" (the only behavior before this field
+	 * existed — kept as the default for backward compatibility with rooms
+	 * created before per-room servers). Set on join from the invite link, and
+	 * on create by minting a room-scoped token against the hub's own server —
+	 * never the vault's master token, so a leaked invite only ever grants
+	 * access to this one room's Durable Object and blobs, not the vault's
+	 * main sync, snapshots, or any other room.
+	 */
+	host?: string;
+	token?: string;
 }
 
 export interface VaultSyncSettings {
@@ -921,12 +934,24 @@ export class VaultSyncSettingTab extends PluginSettingTab {
 
 					if (room.role === "hub") {
 						actions.createEl("button", { text: "Invite" }).addEventListener("click", () => {
-							const { host, token } = this.plugin.settings;
-							if (!host || !token) {
-								new Notice("Configure the connection first.", 6000);
-								return;
-							}
-							new RoomInviteModal(this.app, host, token, room).open();
+							void (async () => {
+								const { host, token } = this.plugin.settings;
+								if (!host || !token) {
+									new Notice("Configure the connection first.", 6000);
+									return;
+								}
+								let roomToken: string;
+								try {
+									roomToken = await mintRoomToken(host, token, room.roomId);
+								} catch (err) {
+									new Notice(
+										`Failed to create invite: ${err instanceof Error ? err.message : String(err)}`,
+										6000,
+									);
+									return;
+								}
+								new RoomInviteModal(this.app, host, roomToken, room).open();
+							})();
 						});
 
 						actions.createEl("button", { text: "Edit" }).addEventListener("click", () => {

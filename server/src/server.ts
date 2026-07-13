@@ -16,6 +16,7 @@ import {
 	prepareTraceEntryForStorage,
 	type TraceEntry as StoredTraceEntry,
 } from "./traceStore";
+import { bytesToHex, sha256Hex } from "./hex";
 
 /**
  * y-partyserver's WSSharedDoc disables y-protocols/awareness's own periodic
@@ -36,6 +37,7 @@ const JOURNAL_COMPACT_MAX_ENTRIES = 50;
 const JOURNAL_COMPACT_MAX_BYTES = 1 * 1024 * 1024;
 const TRACE_DEBUG_LIMIT = 100;
 const LOG_PREFIX = "[lodestone-sync:server]";
+const ROOM_TOKEN_HASH_STORAGE_KEY = "__lodestoneRoomTokenHash";
 
 interface ServerTraceEntry extends StoredTraceEntry {}
 
@@ -206,6 +208,28 @@ export class VaultSyncServer extends YServer {
 				body = {};
 			}
 			return json(await this.createDailySnapshotMaybe(body.device));
+		}
+
+		if (request.method === "POST" && url.pathname === "/__lodestone/mint-room-token") {
+			const token = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+			const hash = await sha256Hex(new TextEncoder().encode(token));
+			await this.ctx.storage.put(ROOM_TOKEN_HASH_STORAGE_KEY, hash);
+			return json({ token });
+		}
+
+		if (request.method === "POST" && url.pathname === "/__lodestone/verify-room-token") {
+			let body: { token?: string } = {};
+			try {
+				body = await request.json();
+			} catch {
+				body = {};
+			}
+			const storedHash = await this.ctx.storage.get<string>(ROOM_TOKEN_HASH_STORAGE_KEY);
+			if (!storedHash || !body.token) {
+				return json({ valid: false });
+			}
+			const presentedHash = await sha256Hex(new TextEncoder().encode(body.token));
+			return json({ valid: presentedHash === storedHash });
 		}
 
 		return new Response("Not found", { status: 404 });

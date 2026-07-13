@@ -38,7 +38,7 @@ phase section below.
 | **A** | 3.0.4 | ✅ shipped 2026-07-06 | Phase 1 (1.1–1.10) critical data-loss fixes + 10.1 (js-yaml runtime bump). Regression suite: `tests/phase1-critical-fixes-regressions.mjs`. |
 | **B** | 3.1.0 | ✅ shipped 2026-07-06 | Phase 2 (2.2–2.10) server security — 2.1 shipped earlier as part of live-testing fixes in 3.0.3. **2.6 intentionally NOT fixed** (audited, genuinely blocked on a `y-partyserver` limitation — see Phase 2 section). Server redeploy was required for this one. Regression suite: `tests/batch-b-security-regressions.mjs`. |
 | **C** | 3.2.0 | ✅ shipped 2026-07-10 | Phase 4 rooms, the fixable-without-a-new-feature subset: **4.3 revert loop (turned out to be 3 bugs — see 4.3, the fire-and-forget propagation fix is probably the bigger win)**, **4.4** setVaultMode race (blocking dependency for testing 4.3), **4.1 privacy leak** (fixed at the entry gate, not via `buildFilteredUpdate`), **4.5 investigated and deliberately deferred** (both plan-suggested fixes checked against real Yjs internals and found unsafe/ineffective — documented, not attempted), **4.7 diagnosed** (manual latency probe post-4.3-fix shows consistent ~150ms server-side propagation — the 4.3 fire-and-forget bug is the leading suspect for Austin's 15s delay; needs re-test to confirm), 4.8 already closed via README (no code change needed). Partial 4.6 room test suite (seeding, revert-loop, orphan-content-leak — 3 of ~5 planned scenarios; echo-suppression and 2.5.x ghost-file scenarios still open, folded into Batch C2). |
-| **C2** | 3.3.0 | ⏳ in progress 2026-07-11 | **Major mid-batch discovery: the entire hub/spoke DO-to-DO bridge system (HubRegistry, setVaultMode, apply-spoke-update/apply-hub-update, propagateCrossVault, structural rejection/revert — i.e. most of what Batch C fixed) turned out to be dead code, unreachable from the real client since May 2026 — see the correction banner at the top of Phase 4 for the full story.** Decided with Austin: delete it rather than revive it. Revised C2 scope: (1) delete the dead bridge + its tests (done), (2) **4.2 + 4.6a redesigned for the real same-DO architecture** — much simpler than originally scoped, since there's no bridge to build auth for: `RoomConfig` gains optional host/token, a new per-room-DO mint/verify endpoint issues room-scoped tokens, `startRoomSync` routes per-room, `handleRoomJoinParams` simplifies (no more cross-server block), (3) **4.10 — tighten + honestly document the client-side structural write-gate** (decided: stay client-side, not a security boundary, say so in the README), (4) 4.7's "probably fixed" conclusion retracted (it fixed dead code) — back to unconfirmed, (5) 4.1/4.3/4.4/4.5 marked moot (fixed dead code, since deleted) but kept in this doc as case-study history, not deleted from the plan. |
+| **C2** | 3.3.0 | ✅ shipped 2026-07-13 | **Major mid-batch discovery: the entire hub/spoke DO-to-DO bridge system (HubRegistry, setVaultMode, apply-spoke-update/apply-hub-update, propagateCrossVault, structural rejection/revert — i.e. most of what Batch C fixed) turned out to be dead code, unreachable from the real client since May 2026 — see the correction banner at the top of Phase 4 for the full story.** Decided with Austin: delete it rather than revive it. Revised C2 scope, all done: (1) deleted the dead bridge + its tests, (2) **4.2 + 4.6a redesigned and shipped for the real same-DO architecture** — much simpler than originally scoped, since there's no bridge to build auth for: `RoomConfig` gains optional host/token, a new per-room-DO mint/verify endpoint issues room-scoped tokens, `startRoomSync` routes per-room, `handleRoomJoinParams` simplified (no more cross-server block), invite minting wired into the settings UI, (3) **4.10 — tightened + honestly documented the client-side structural write-gate** (client-side write-gate now boundary-safe across all 8 call sites; README states it's not a security boundary), (4) 4.7's "probably fixed" conclusion retracted (it fixed dead code) — back to unconfirmed, (5) 4.1/4.3/4.4/4.5 marked moot (fixed dead code, since deleted) but kept in this doc as case-study history, not deleted from the plan. New regression test: `tests/room-scoped-token-regression.mjs`. Known remaining gap (not blocking): per-room `BlobSyncManager` doesn't yet follow a room's own host/token (4.6a item 4) — attachments in a room hosted on a different server than the vault's main connection aren't covered yet. |
 | D | 3.3.x | pending | Phase 8 test gaps (blobSync suite first — zero coverage on 1,320 lines) + Phase 9 release/docs hygiene incl. README revision (9.7). |
 | E | 3.4.0 | pending | Phase 6 main.ts decomposition (no behavior change intended; run full test suite after each extraction step, not just at the end). |
 | F | 3.5.0 | pending | Phase 7 remainder: settings redesign (7.15–7.24), first-run modal, R2 flow, quick-win copy. Several Phase 7 items already shipped opportunistically during live-testing sessions (claim-page resume + connection auto-detect, settings auto-refresh, invite-click routing fix, `workers_dev` default) — check each 7.x item against current code before re-implementing, some may already be done. |
@@ -459,12 +459,11 @@ Treat 4.2/4.6a as security work.
   document is unmodified by it. **Deleted 2026-07-11** along with the code it tested.
 
 ### 4.2 Room invites embed the vault-wide server token
-- **STATUS: REDESIGNED 2026-07-11 for the real (same-DO) architecture — being
-  implemented now as part of Batch C2 (v3.3.0), together with 4.6a below;
+- **STATUS: FIXED 2026-07-13 (Batch C2, v3.3.0), together with 4.6a below —
   they're one feature, not two.** The `/hub/{id}/invite` endpoint mentioned in
   the original finding was part of the deleted bridge system and no longer
   exists; `buildRoomInviteUrl` (`src/settings.ts`) is still the real invite
-  builder and still the thing this fixes.
+  builder and was the thing this fixed.
 - **Design** (real architecture: a room is "connect to `vaultId=roomId` on
   some host with some token" — no DO-to-DO bridge involved at all, which
   makes this much simpler than originally scoped):
@@ -483,13 +482,23 @@ Treat 4.2/4.6a as security work.
     vaultId's own `verify-room-token`; treat a match as authorized for that
     request. A token minted for room X only ever verifies true against room
     X's own DO, so this can't leak into other rooms or the owner's main vault.
-  - Client: `createRoom` (hub side) mints a room-scoped token via the new
-    endpoint and uses it (not the master token) when building the invite.
+  - Client: the settings tab's "Invite" button (`src/settings.ts`) mints a
+    room-scoped token via `mintRoomToken` (`src/sync/serverCapabilities.ts`)
+    and uses it — not the master token — when opening `RoomInviteModal`.
     `buildRoomInviteUrl`'s params are unchanged (`host`, `token`, `roomId`,
     `name`, `paths`) — this is a value change (scoped token instead of
     master token), not a URL-format change, so old and new invite links
     parse identically on the receiving end.
-- **This also directly enables 4.6a** (a room living on a different Worker
+- **Implemented**: `server/src/server.ts` (`/__lodestone/mint-room-token`,
+  `/__lodestone/verify-room-token`), `server/src/index.ts` (public
+  `POST /vault/{roomId}/room-token`, WS-sync + blobs auth fallback),
+  `src/sync/serverCapabilities.ts` (`mintRoomToken` client helper),
+  `src/settings.ts` (Invite button now mints before building the link).
+  **Test**: `tests/room-scoped-token-regression.mjs` — mint requires the
+  master token, a minted token authorizes WS sync + blobs for its own room
+  only (rejected for any other room), and is rejected outright for
+  debug/snapshots/re-minting (master-token-only, no fallback).
+- **This also directly enabled 4.6a** (a room living on a different Worker
   than the vault's main connection) — see that section; the two were
   designed together.
 
@@ -603,13 +612,13 @@ Treat 4.2/4.6a as security work.
   across many structural/non-structural cases) rather than as a quick patch.
 
 ### 4.6a Per-room server credentials / multi-server topology *(added 2026-07-06 from live testing)*
-- **STATUS: BEING IMPLEMENTED 2026-07-11 (Batch C2, targeting v3.3.0) — and
-  substantially SIMPLER than originally scoped**, now that the real
-  architecture is understood (correction banner at the top of Phase 4). A
-  room is just "connect this room's `VaultSync` to `vaultId=roomId` on some
-  host with some token" — there is no DO-to-DO bridge to design auth for, so
-  this is closer to a settings/routing change than the multi-server-topology
-  feature originally imagined.
+- **STATUS: FIXED 2026-07-13 (Batch C2, v3.3.0) — and substantially SIMPLER
+  than originally scoped**, now that the real architecture is understood
+  (correction banner at the top of Phase 4). A room is just "connect this
+  room's `VaultSync` to `vaultId=roomId` on some host with some token" — there
+  is no DO-to-DO bridge to design auth for, so this ended up being closer to a
+  settings/routing change than the multi-server-topology feature originally
+  imagined.
 - **Before this fix**: rooms are pinned to the vault's single connection
   (`settings.host`/`token`). A vault with no connection that joins a room
   **adopts the inviter's server as its own vault sync server** (whole vault
@@ -624,27 +633,29 @@ Treat 4.2/4.6a as security work.
   deploys its own worker for its own room; that instance is completely
   separate from the room it spokes into.
 - **Implementation** (paired with 4.2 above — one feature):
-  1. `RoomConfig` (`src/settings.ts`) gains optional `host?: string; token?:
-     string;` — `undefined` means "fall back to `settings.host`/`token`"
-     (backward compatible: existing rooms with neither field keep working
-     exactly as today).
-  2. `startRoomSync` (`src/main.ts`) uses `room.host ?? this.settings.host` /
-     `room.token ?? this.settings.token` instead of unconditionally spreading
-     `...this.settings`.
-  3. `handleRoomJoinParams` simplifies significantly: no more cross-server
-     block, no more "adopt this as my main connection" behavior — the
-     invite's `host`/`token` (now a room-scoped token per 4.2, not the master
-     token) are stored directly on the joining vault's `RoomConfig`, used
-     only for that room's connection. The scary ConfirmModal about "this
-     will become your vault's main sync server" goes away because it's no
+  1. **Done.** `RoomConfig` (`src/settings.ts`) gains optional `host?: string;
+     token?: string;` — `undefined` means "fall back to
+     `settings.host`/`token`" (backward compatible: existing rooms with
+     neither field keep working exactly as today).
+  2. **Done.** `startRoomSync` (`src/main.ts`) uses
+     `room.host ?? this.settings.host` / `room.token ?? this.settings.token`
+     instead of unconditionally spreading `...this.settings`.
+  3. **Done.** `handleRoomJoinParams` simplified significantly: no more
+     cross-server block, no more "adopt this as my main connection" behavior
+     — the invite's `host`/`token` (now a room-scoped token per 4.2, not the
+     master token) are stored directly on the joining vault's `RoomConfig`,
+     used only for that room's connection. The scary ConfirmModal about "this
+     will become your vault's main sync server" is gone because it's no
      longer true — joining a room never touches the vault's own main
      connection anymore, regardless of whether the vault has one.
-  4. Per-room `BlobSyncManager`/capabilities cache also need the same
-     `room.host ?? settings.host` treatment if attachment sync inside rooms
-     on a different server is wanted — currently blob sync is global,
-     singular, and tied to `this.vaultSync` only (see the Explore agent
-     report from 2026-07-11 in session history for exact call sites if this
-     part isn't done yet when you read this).
+  4. **NOT done — known remaining gap, not blocking this release.** Per-room
+     `BlobSyncManager`/capabilities cache still need the same
+     `room.host ?? settings.host` treatment for attachment sync inside a room
+     hosted on a different server than the vault's own connection — blob sync
+     today is global, singular, and tied to `this.vaultSync` only. Rooms on
+     the vault's own server (the common case) are unaffected; only rooms with
+     an explicit per-room `host`/`token` and attachments would hit this. Scope
+     for a follow-up batch if/when that combination is actually used.
 - **Status note**: the old seeding bug (2.1, fixed in 3.0.3) doesn't apply to
   the real architecture at all — a spoke connecting to an existing roomId
   gets the full document for free via the normal y-partyserver WS sync
@@ -771,7 +782,17 @@ Treat 4.2/4.6a as security work.
 - **Do not start this without an explicit go-ahead** — it's a meaningfully
   larger scope than a settings-field add, given the above.
 
-### 4.10 Tighten the client-side structural write-gate; document the limitation *(added 2026-07-11, decided)*
+### 4.10 Tighten the client-side structural write-gate; document the limitation *(added 2026-07-11, decided; fixed 2026-07-13)*
+- **STATUS: FIXED 2026-07-13 (Batch C2, v3.3.0).** All folder-prefix checks
+  gating room membership (`isRoomManagedPath`, `getBindingManagerForFile`,
+  `getRoomSyncAndCrdtPath`, the room `DiskMirror` include filter, and
+  `seedRoomFromDisk`'s seed/prune loops — 8 call sites total across
+  `src/main.ts`) now go through one shared `isPathUnderAnyPrefix` helper that
+  requires an exact match or a `/`-bounded descendant, closing the bug where
+  an included folder `"Shared"` would also match an unrelated folder like
+  `"SharedPrivate/"`. README's Rooms section and FAQ also updated with an
+  explicit non-security-boundary caveat — see the "What 'document' means"
+  note below, now done.
 - **Decision (Austin, 2026-07-11)**: given the choice between building real
   server-side structural enforcement in the shared room DO (correct, but a
   genuinely new feature — the DO would need to know which connection sent a

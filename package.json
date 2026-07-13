@@ -1,6 +1,6 @@
 {
 	"name": "lodestone",
-	"version": "3.2.0",
+	"version": "3.3.0",
 	"description": "A zero-terminal, real-time sync engine powered by your own Cloudflare Worker.",
 	"main": "main.js",
 	"type": "module",
@@ -15,7 +15,7 @@
 		"test:ci": "npm run test:regressions && npm run test:integration:worker",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
-		"test:room-integration": "node tests/room-same-doc-sync-check.mjs"
+		"test:room-integration": "node tests/room-same-doc-sync-check.mjs && node tests/room-scoped-token-regression.mjs"
 	},
 	"keywords": [],
 	"license": "0-BSD",

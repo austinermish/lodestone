@@ -69,6 +69,8 @@ Rooms let one vault (the **hub**) share specific folders with other vaults (**sp
 - **Content editing is fully bidirectional** — hub and spokes both edit file content live, with real-time cursors, using the same CRDT engine as normal device sync.
 - **Structure is host-only** — creating, renaming, moving, or deleting files and folders inside a shared room is restricted to the hub. If a spoke creates a file in a shared folder, it stays local to that spoke's vault and does not sync anywhere else. This is a deliberate design choice (see [Origin](#origin)) that keeps folder structure authoritative and avoids conflicting structural edits arriving from multiple vaults at once. It's not a bug — see the FAQ below.
 - Today, each hub runs on its own Cloudflare Worker. A vault can be a spoke in someone else's room and a hub of its own room at the same time, on separate infrastructure.
+- **Invites use a token scoped to that one room** — not your vault's main sync token — so a leaked invite link only ever grants access to that room's shared folders, never your whole vault, snapshots, or any other room.
+- **Host-only structure is enforced by the plugin, not the server.** A modified or malicious spoke client could bypass it and write structural changes anyway; the shared server has no server-side check preventing this today. Treat rooms as a trust boundary between people you'd already share files with directly, not a security boundary against an adversarial spoke.
 
 ## Updating your server
 

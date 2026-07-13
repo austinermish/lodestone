@@ -478,6 +478,43 @@ async function fetchVaultDebug(env: Env, vaultId: string): Promise<Response> {
 	return await stub.fetch("https://internal/__lodestone/debug");
 }
 
+/** Mint a fresh room-scoped token for this vault's own Durable Object (i.e. the
+ * room's DO, since a room uses its roomId as its vaultId). Master-token-only
+ * caller-side gating — see the /room-token route below. */
+async function mintRoomToken(env: Env, vaultId: string): Promise<string> {
+	const stub = await getServerByName(env.LODESTONE_SYNC, vaultId);
+	const res = await stub.fetch("https://internal/__lodestone/mint-room-token", { method: "POST" });
+	if (!res.ok) {
+		throw new Error(`room token mint failed (${res.status})`);
+	}
+	const payload: { token?: string } = await res.json();
+	if (!payload.token) {
+		throw new Error("room token mint failed (missing token)");
+	}
+	return payload.token;
+}
+
+/** Verify a presented token against the room-scoped token hash stored on this
+ * vaultId's own Durable Object. Used only as a narrow auth fallback for room
+ * WS-sync and blob routes — never for debug/snapshots, which stay
+ * master-token-only. */
+async function verifyRoomToken(env: Env, vaultId: string, token: string): Promise<boolean> {
+	try {
+		const stub = await getServerByName(env.LODESTONE_SYNC, vaultId);
+		const res = await stub.fetch("https://internal/__lodestone/verify-room-token", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ token }),
+		});
+		if (!res.ok) return false;
+		const payload: { valid?: boolean } = await res.json();
+		return payload.valid === true;
+	} catch (err) {
+		console.warn(`${LOG_PREFIX} room token verify failed:`, err);
+		return false;
+	}
+}
+
 async function handleBlobExists(
 	env: Env,
 	vaultId: string,
@@ -776,7 +813,7 @@ const worker = {
 				const response = rejectSocket(req, "server_misconfigured");
 				return isWebSocketRequest(req) ? response : withCors(response);
 			}
-			if (!(await isAuthorized(authState, token))) {
+			if (!(await isAuthorized(authState, token)) && !(token && (await verifyRoomToken(env, syncRoute.vaultId, token)))) {
 				logRejection(syncRoute.vaultId, "ws-rejected", { reason: "unauthorized" });
 				const response = rejectSocket(req, "unauthorized");
 				return isWebSocketRequest(req) ? response : withCors(response);
@@ -832,6 +869,7 @@ const worker = {
 		}
 
 		const token = getHttpAuthToken(req);
+		const [resource, ...rest] = vaultRoute.rest;
 		if (!authState.claimed) {
 			logRejection(vaultRoute.vaultId, "http-rejected", {
 				reason: "unclaimed",
@@ -848,7 +886,13 @@ const worker = {
 			});
 			return withCors(json({ error: "server_misconfigured" }, 503));
 		}
-		if (!(await isAuthorized(authState, token))) {
+		// Room-scoped tokens are a valid fallback for blob storage only — never
+		// for debug/snapshots/room-token-minting, which stay master-token-only.
+		const roomTokenFallbackEligible = resource === "blobs";
+		if (
+			!(await isAuthorized(authState, token))
+			&& !(roomTokenFallbackEligible && token && (await verifyRoomToken(env, vaultRoute.vaultId, token)))
+		) {
 			logRejection(vaultRoute.vaultId, "http-unauthorized", {
 				method: req.method,
 				path: url.pathname,
@@ -857,9 +901,18 @@ const worker = {
 		}
 		markClientSeen(env, ctx);
 
-		const [resource, ...rest] = vaultRoute.rest;
 		if (!resource) {
 			return withCors(json({ error: "not found" }, 404));
+		}
+
+		if (resource === "room-token" && req.method === "POST" && rest.length === 0) {
+			try {
+				const roomToken = await mintRoomToken(env, vaultRoute.vaultId);
+				return withCors(json({ token: roomToken }));
+			} catch (err) {
+				console.warn(`${LOG_PREFIX} room token mint failed:`, err);
+				return withCors(json({ error: "mint_failed" }, 500));
+			}
 		}
 
 		if (resource === "debug" && req.method === "GET" && rest[0] === "recent") {

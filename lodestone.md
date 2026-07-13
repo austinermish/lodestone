@@ -42,10 +42,14 @@ obsidian://lodestone?action=spoke&host=HOST_URL&hubVaultId=VAULT_ID&token=TOKEN
 
 **Multiple rooms** — A hub can create multiple rooms simultaneously, each with a different folder set and a different group of spokes. A vault can also be a spoke in multiple rooms at the same time. Each room is a separate connection, a separate Y.Doc, and a separate folder on the spoke side. Rooms do not interact with each other.
 
-**One Cloudflare Worker** — All rooms live on a single deployed Worker. Each room gets its own Durable Object instance (keyed to the `roomId`), which holds that room's Y.Doc and handles WebSocket connections. No per-room server configuration is needed — the DO provides full per-room isolation automatically.
+**Per-room server topology** *(v3.3.0+)* — A room does not have to live on the same Cloudflare Worker as its hub's main vault connection. `RoomConfig` carries optional `host`/`token` fields; when unset, the room falls back to the vault's own main connection (the only behavior that existed before this). Each hub runs its own Worker for the rooms it hosts — a vault that is a spoke in someone else's room and a hub of its own room at the same time can have both on completely separate infrastructure. Within one Worker, every room still gets its own Durable Object instance (keyed to the `roomId`), which holds that room's Y.Doc and handles WebSocket connections.
+
+**Room-scoped invite tokens** *(v3.3.0+)* — Invite links do not carry the vault's master sync token. The hub mints a token scoped to that one room's own Durable Object (`POST /vault/{roomId}/room-token`, master-token-authenticated) and embeds that instead. A room-scoped token authorizes WebSocket sync and blob access for that one room only — never the vault's main sync, snapshots, debug routes, or any other room. This is a server-side check (`verify-room-token` on the room's own DO), unlike the structure gate below.
+
+**Structural write-gate is client-side only** — "only the hub can create/rename/move/delete files in a room" (see Constraints) is enforced by the plugin — the client simply never routes a spoke's structural change into the shared Y.Doc. It is not enforced by the server, and a modified or malicious spoke client could bypass it. This is a deliberate, documented tradeoff (see PROJECT-PLAN.md 4.10), not an oversight — do not describe it elsewhere as a security boundary.
 
 ## Constraints
 
 - A vault can only act as a Hub for **one vault instance**. A single vault cannot simultaneously host multiple independent sync groups.
-- Hub and spoke must share the same Cloudflare Worker (host). The invite URL carries the host URL and token for first-time setup only.
+- Within a room, structural changes (create/rename/move/delete) are host-only — enforced client-side, see above.
 - Vault size target: ~50 MB (see `engineering/warts-and-limits.md` for canonical limits).

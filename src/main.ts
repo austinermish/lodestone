@@ -122,6 +122,25 @@ function applyReverseAlias(localPath: string, aliases: Record<string, string>): 
 }
 
 /**
+ * Room folder scoping gate. This is the ONLY thing standing between a room's
+ * shared folders and the rest of the vault — see PROJECT-PLAN.md 4.10. It's
+ * enforced client-side only (the server has no concept of which paths a room
+ * is scoped to), so a compromised or buggy client is not defended against by
+ * this check. A plain `path.startsWith(prefix)` is not safe here: prefix
+ * "Shared" would also match "SharedPrivate/notes.md", silently pulling an
+ * unrelated folder into the room. Require an exact match or a `/`-bounded
+ * descendant instead.
+ */
+function isPathUnderAnyPrefix(path: string, prefixes: string[]): boolean {
+	return prefixes.some((prefix) => {
+		if (!prefix) return false;
+		if (path === prefix) return true;
+		const boundary = prefix.endsWith("/") ? prefix : prefix + "/";
+		return path.startsWith(boundary);
+	});
+}
+
+/**
  * Pin the reusable workflow to a specific tag rather than @main. Every
  * release is tagged with the plugin version (enforced by release.yml), so
  * the running plugin's own version is always a valid, immutable ref — and
@@ -367,11 +386,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	private isRoomManagedPath(localPath: string): boolean {
 		for (const room of this.settings.rooms) {
 			if (room.role === "hub") {
-				if (room.includePaths.some((p) => {
-					if (!p) return false;
-					const prefix = p.endsWith("/") ? p : p + "/";
-					return localPath === p || localPath.startsWith(prefix);
-				})) return true;
+				if (isPathUnderAnyPrefix(localPath, room.includePaths)) return true;
 			} else {
 				const roomSync = this.roomSyncs.get(room.roomId);
 				if (!roomSync) continue;
@@ -380,7 +395,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				if (roomSync.getTextForPath(crdtPath)) return true;
 				// Also match new files inside the hub's shared folders (not yet in Y.Doc).
 				const hubPaths = room.hubIncludePaths ?? [];
-				if (hubPaths.length > 0 && hubPaths.some((p) => crdtPath.startsWith(p))) return true;
+				if (hubPaths.length > 0 && isPathUnderAnyPrefix(crdtPath, hubPaths)) return true;
 			}
 		}
 		return false;
@@ -1290,7 +1305,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			if (!mgr) continue;
 			if (room.role === "hub") {
 				if (room.includePaths.length === 0) continue;
-				if (room.includePaths.some((p) => filePath.startsWith(p))) return mgr;
+				if (isPathUnderAnyPrefix(filePath, room.includePaths)) return mgr;
 			} else if (room.role === "spoke") {
 				// Translate local path to CRDT path (reverses any folder alias) before
 				// checking the room Y.Doc — the Y.Doc always stores hub-side paths.
@@ -1300,7 +1315,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				// Also route new files that fall within the hub's shared folders
 				// (not yet in Y.Doc) so they open with the room binding.
 				const hubPaths = room.hubIncludePaths ?? [];
-				if (hubPaths.length > 0 && hubPaths.some((p) => crdtPath.startsWith(p))) return mgr;
+				if (hubPaths.length > 0 && isPathUnderAnyPrefix(crdtPath, hubPaths)) return mgr;
 			}
 		}
 		return this.editorBindings;
@@ -3395,7 +3410,15 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	}
 
 	/** Join an existing room as spoke. Saves config, starts room sync. */
-	async joinRoom(roomId: string, displayName: string, includePaths: string[], pathAliases: Record<string, string> = {}, hubIncludePaths: string[] = []): Promise<void> {
+	async joinRoom(
+		roomId: string,
+		displayName: string,
+		includePaths: string[],
+		pathAliases: Record<string, string> = {},
+		hubIncludePaths: string[] = [],
+		host?: string,
+		token?: string,
+	): Promise<void> {
 		if (this.settings.rooms.find((r) => r.roomId === roomId)) {
 			throw new Error("Already in this room.");
 		}
@@ -3406,6 +3429,8 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			includePaths,
 			...(Object.keys(pathAliases).length > 0 ? { pathAliases } : {}),
 			...(hubIncludePaths.length > 0 ? { hubIncludePaths } : {}),
+			...(host ? { host } : {}),
+			...(token ? { token } : {}),
 		};
 		this.settings.rooms = [...this.settings.rooms, room];
 		await this.saveSettings();
@@ -3423,12 +3448,20 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 	/** Start VaultSync + DiskMirror for a single room. */
 	private async startRoomSync(room: RoomConfig): Promise<void> {
 		if (this.roomSyncs.has(room.roomId)) return;
-		if (!this.settings.host || !this.settings.token) return;
+		// A room's own host/token take priority — set on join from the invite
+		// (a room-scoped token, not the vault's master token) or on create by
+		// the hub. Undefined falls back to this vault's main connection, which
+		// is the only behavior that existed before per-room servers.
+		const roomHost = room.host ?? this.settings.host;
+		const roomToken = room.token ?? this.settings.token;
+		if (!roomHost || !roomToken) return;
 
 		// Hub: scope to the shared folders. Spoke: unscoped — mirror everything in the room Y.Doc.
 		const isHub = room.role === "hub";
 		const roomSettings: VaultSyncSettings = {
 			...this.settings,
+			host: roomHost,
+			token: roomToken,
 			vaultId: room.roomId,
 			includePaths: isHub ? room.includePaths.join(", ") : "",
 			excludePatterns: "",
@@ -3472,7 +3505,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				// Spoke: mirror everything from the room Y.Doc (already scoped by the hub).
 				if (!isHub) return true;
 				if (hubPaths.length === 0) return true;
-				return hubPaths.some((prefix) => path.startsWith(prefix));
+				return isPathUnderAnyPrefix(path, hubPaths);
 			},
 			aliases ? (crdtPath) => applyAlias(crdtPath, aliases) : undefined,
 		);
@@ -3514,7 +3547,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 			const roomSync = this.roomSyncs.get(room.roomId);
 			if (!roomSync) continue;
 			if (room.role === "hub") {
-				if (room.includePaths.some((p) => localPath.startsWith(p))) {
+				if (isPathUnderAnyPrefix(localPath, room.includePaths)) {
 					return { roomSync, crdtPath: localPath };
 				}
 			} else if (room.role === "spoke") {
@@ -3525,7 +3558,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 				// For new files not yet in the room Y.Doc, fall back to the hub's
 				// shared folder paths stored at join time.
 				const hubPaths = room.hubIncludePaths ?? [];
-				if (hubPaths.length > 0 && hubPaths.some((p) => crdtPath.startsWith(p))) {
+				if (hubPaths.length > 0 && isPathUnderAnyPrefix(crdtPath, hubPaths)) {
 					return { roomSync, crdtPath };
 				}
 			}
@@ -3591,7 +3624,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const diskPaths = new Set(allFiles.map((f) => f.path));
 		let seeded = 0;
 		for (const file of allFiles) {
-			if (!room.includePaths.some((p) => file.path.startsWith(p))) continue;
+			if (!isPathUnderAnyPrefix(file.path, room.includePaths)) continue;
 			if (roomSync.getTextForPath(file.path)) continue; // already in room Y.Doc
 			if (this.maxFileSize > 0) {
 				const stat = await this.app.vault.adapter.stat(file.path);
@@ -3615,7 +3648,7 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		const activePaths = roomSync.getActiveMarkdownPaths();
 		let pruned = 0;
 		for (const crdtPath of activePaths) {
-			if (!room.includePaths.some((p) => crdtPath.startsWith(p))) continue;
+			if (!isPathUnderAnyPrefix(crdtPath, room.includePaths)) continue;
 			if (!diskPaths.has(crdtPath)) {
 				roomSync.handleDelete(crdtPath, this.settings.deviceName);
 				pruned++;
@@ -3649,7 +3682,16 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		await this.handleRoomJoinParams({ roomId, host, token, name, pathAliases, hubIncludePaths });
 	}
 
-	/** Internal handler for both protocol URL and settings UI join flows. */
+	/**
+	 * Internal handler for both protocol URL and settings UI join flows.
+	 *
+	 * Each room carries its own host/token (see RoomConfig) — set here, from
+	 * the invite, and used only for this room's own VaultSync. Joining a room
+	 * never touches this vault's main settings.host/token, regardless of
+	 * whether the vault has a main connection of its own: rooms on a
+	 * different server than the vault's own connection, or on a server the
+	 * vault otherwise has nothing to do with, both just work the same way.
+	 */
 	private async handleRoomJoinParams(p: {
 		roomId: string;
 		host: string;
@@ -3659,52 +3701,32 @@ export default class VaultCrdtSyncPlugin extends Plugin {
 		hubIncludePaths?: string[];
 	}): Promise<void> {
 		if (!p.roomId) throw new Error("Invite link is missing roomId.");
+		if (!p.host || !p.token) throw new Error("Invite link is missing host or token.");
 
 		if (this.settings.rooms.find((r) => r.roomId === p.roomId)) {
 			new Notice(`Already in room "${p.name}".`, 5000);
 			return;
 		}
 
-		let restartNeeded = false;
-		if (!this.settings.host || !this.settings.token) {
-			if (!p.host || !p.token) {
-				throw new Error("Invite link is missing host/token, and this vault has no server connection.");
-			}
-			const accepted = await new Promise<boolean>((resolve) => {
-				new ConfirmModal(
-					this.app,
-					"Use the inviter's server for this vault?",
-					`This vault has no sync server of its own, so joining "${p.name}" will also make ${p.host} ` +
-						"this vault's sync server. Your entire vault (not just the shared folder) will sync to it, " +
-						"and its owner controls that infrastructure. You can deploy your own server later from settings.",
-					() => resolve(true),
-					"Join and use this server",
-					"Cancel",
-					() => resolve(false),
-				).open();
-			});
-			if (!accepted) {
-				new Notice("Room join cancelled.", 5000);
-				return;
-			}
-			this.settings.host = p.host;
-			this.settings.token = p.token;
-			restartNeeded = true;
-		} else if (p.host && this.settings.host !== p.host) {
-			new Notice(
-				"This invite is for a different server than this vault's connection. Rooms across different servers aren't supported yet, so the join was not completed.",
-				10000,
-			);
+		const accepted = await new Promise<boolean>((resolve) => {
+			new ConfirmModal(
+				this.app,
+				`Join "${p.name}"?`,
+				`This will connect to ${p.host} for this room only — your vault's own sync connection ` +
+					"(if any) is unaffected. Only the folders shared in this invite will sync.",
+				() => resolve(true),
+				"Join",
+				"Cancel",
+				() => resolve(false),
+			).open();
+		});
+		if (!accepted) {
+			new Notice("Room join cancelled.", 5000);
 			return;
 		}
 
 		// Spoke joins with no includePaths — the room Y.Doc is already scoped by the hub.
-		await this.joinRoom(p.roomId, p.name, [], p.pathAliases ?? {}, p.hubIncludePaths ?? []);
-
-		if (restartNeeded) {
-			this.teardownSync();
-			await this.initSync();
-		}
+		await this.joinRoom(p.roomId, p.name, [], p.pathAliases ?? {}, p.hubIncludePaths ?? [], p.host, p.token);
 
 		new Notice(`Joined room "${p.name}". Shared files are syncing.`, 6000);
 		this.settingTab?.display();
