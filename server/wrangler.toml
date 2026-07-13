@@ -11,10 +11,6 @@ class_name = "VaultSyncServer"
 name = "LODESTONE_CONFIG"
 class_name = "ServerConfig"
 
-[[durable_objects.bindings]]
-name = "LODESTONE_HUB"
-class_name = "HubRegistry"
-
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["VaultSyncServer", "ServerConfig"]
@@ -22,6 +18,16 @@ new_sqlite_classes = ["VaultSyncServer", "ServerConfig"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["HubRegistry"]
+
+# HubRegistry backed a hub/spoke DO-to-DO bridge architecture that was
+# superseded in May 2026 by same-Durable-Object room sync (hub and spoke both
+# connect to one Y.Doc keyed by roomId) — the bridge was never wired into the
+# client that replaced it and has been deleted as dead code. This migration
+# formally decommissions the class; Cloudflare requires it (or deployment
+# fails with "class no longer exported but referenced by migration history").
+[[migrations]]
+tag = "v3"
+deleted_classes = ["HubRegistry"]
 
 [observability.logs]
 enabled = true

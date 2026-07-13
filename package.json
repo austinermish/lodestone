@@ -15,8 +15,7 @@
 		"test:ci": "npm run test:regressions && npm run test:integration:worker",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
-		"test:seed-scale": "node tests/room-seed-scale-check.mjs",
-		"test:room-integration": "node tests/room-seed-scale-check.mjs && node tests/room-revert-loop-regression.mjs && node tests/room-orphan-content-leak-regression.mjs"
+		"test:room-integration": "node tests/room-same-doc-sync-check.mjs"
 	},
 	"keywords": [],
 	"license": "0-BSD",

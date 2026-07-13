@@ -3,7 +3,6 @@ import * as Y from "yjs";
 import { mapWithConcurrency } from "./concurrency";
 import { sha256Hex } from "./hex";
 import { ServerConfig, type StoredServerConfig } from "./config";
-import { HubRegistry, type SpokeEntry } from "./hubRegistry";
 import {
 	blobKey,
 	createSnapshot,
@@ -37,7 +36,6 @@ interface Env {
 	LODESTONE_CANONICAL_REPO?: string;
 	LODESTONE_SYNC: DurableObjectNamespace<VaultSyncServer>;
 	LODESTONE_CONFIG: DurableObjectNamespace;
-	LODESTONE_HUB: DurableObjectNamespace;
 	LODESTONE_BUCKET?: R2Bucket;
 }
 
@@ -234,17 +232,6 @@ function rejectSocket(
 async function hashToken(token: string): Promise<string> {
 	const bytes = new TextEncoder().encode(token);
 	return sha256Hex(bytes);
-}
-
-/** Chunked base64 encode — spreading a large Uint8Array into String.fromCharCode
- * blows the V8 argument limit (~100 KB), so encode in slices. */
-function bytesToBase64(bytes: Uint8Array): string {
-	let binary = "";
-	const CHUNK = 8192;
-	for (let i = 0; i < bytes.length; i += CHUNK) {
-		binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-	}
-	return btoa(binary);
 }
 
 function supportsBuckets(env: Env): boolean {
@@ -602,136 +589,6 @@ async function handleBlobDownload(
 	return new Response(object.body, { headers });
 }
 
-function getHubRegistryStub(env: Env, hubVaultId: string): DurableObjectStub {
-	const id = env.LODESTONE_HUB.idFromName(hubVaultId);
-	return env.LODESTONE_HUB.get(id);
-}
-
-async function listHubSpokes(env: Env, hubVaultId: string): Promise<SpokeEntry[]> {
-	try {
-		const stub = getHubRegistryStub(env, hubVaultId);
-		const res = await stub.fetch("https://internal/__lodestone/hub/spokes");
-		if (!res.ok) return [];
-		const payload: { spokes?: SpokeEntry[] } = await res.json();
-		return Array.isArray(payload.spokes) ? payload.spokes : [];
-	} catch {
-		return [];
-	}
-}
-
-/**
- * Returns whether the mode write actually landed. Callers that need the mode
- * change to be visible before the next request (registration, spoke removal)
- * must await this and fail loudly on false — a fire-and-forget call here
- * previously let a freshly-registered spoke's DO answer a structural edit
- * with its old ("standalone") mode, silently skipping the spoke->hub
- * propagation this whole feature depends on.
- */
-async function setVaultMode(
-	env: Env,
-	vaultId: string,
-	mode: "hub" | "spoke" | "standalone",
-	hubVaultId?: string,
-): Promise<boolean> {
-	try {
-		const stub = await getServerByName(env.LODESTONE_SYNC, vaultId);
-		const res = await stub.fetch("https://internal/__lodestone/set-mode", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ mode, hubVaultId }),
-		});
-		if (!res.ok) {
-			console.warn(`${LOG_PREFIX} set-mode rejected (${res.status}) for ${vaultId}`);
-			return false;
-		}
-		return true;
-	} catch (err) {
-		console.warn(`${LOG_PREFIX} set-mode failed for ${vaultId}:`, err);
-		return false;
-	}
-}
-
-async function handleHubSpokeRegister(
-	env: Env,
-	hubVaultId: string,
-	req: Request,
-): Promise<Response> {
-	let body: { spokeVaultId?: string; deviceName?: string } = {};
-	try {
-		body = await req.json();
-	} catch {
-		return json({ error: "invalid json" }, 400);
-	}
-
-	if (typeof body.spokeVaultId !== "string" || body.spokeVaultId.trim().length < 8) {
-		return json({ error: "invalid spokeVaultId" }, 400);
-	}
-
-	const spokeVaultId = body.spokeVaultId.trim();
-	const deviceName =
-		typeof body.deviceName === "string" ? body.deviceName.trim() : "Unknown Device";
-
-	// Register in HubRegistry
-	const hubStub = getHubRegistryStub(env, hubVaultId);
-	const regRes = await hubStub.fetch("https://internal/__lodestone/hub/spokes", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ spokeVaultId, deviceName, hubVaultId }),
-	});
-	if (!regRes.ok) {
-		return json({ error: "registration failed" }, 500);
-	}
-
-	// Set the spoke vault's mode to "spoke" — awaited: a client that connects
-	// to the spoke's DO the instant this request returns must see the new mode
-	// immediately, or its structural-change propagation checks silently no-op
-	// against a stale "standalone" mode.
-	const spokeModeOk = await setVaultMode(env, spokeVaultId, "spoke", hubVaultId);
-	if (!spokeModeOk) {
-		return json({ error: "failed to set spoke mode" }, 500);
-	}
-	// Ensure the hub vault's mode is "hub"
-	const hubModeOk = await setVaultMode(env, hubVaultId, "hub");
-	if (!hubModeOk) {
-		return json({ error: "failed to set hub mode" }, 500);
-	}
-
-	// Fetch hub's current Y-Doc state and seed the spoke's DO immediately,
-	// so the spoke client receives content as soon as it connects via WebSocket.
-	// The DO push is the load-bearing step — do it first, in its own try, so a
-	// failure encoding the inline payload can never prevent the seed.
-	let hubDocBytes: Uint8Array | null = null;
-	try {
-		const fetched = await fetchVaultDocument(env, hubVaultId);
-		if (fetched.byteLength > 0) {
-			hubDocBytes = fetched;
-			const spokeStub = await getServerByName(env.LODESTONE_SYNC, spokeVaultId);
-			const seedRes = await spokeStub.fetch("https://internal/__lodestone/apply-hub-update", {
-				method: "POST",
-				headers: { "Content-Type": "application/octet-stream" },
-				body: fetched,
-			});
-			if (!seedRes.ok) {
-				console.warn(`${LOG_PREFIX} spoke seed push rejected (${seedRes.status}) for ${spokeVaultId}`);
-			}
-		}
-	} catch (err) {
-		console.warn(`${LOG_PREFIX} hub doc fetch/seed for spoke failed:`, err);
-	}
-
-	let initialStateUpdateBase64: string | null = null;
-	if (hubDocBytes) {
-		try {
-			initialStateUpdateBase64 = bytesToBase64(hubDocBytes);
-		} catch (err) {
-			// Inline payload is an optimization; the DO is already seeded.
-			console.warn(`${LOG_PREFIX} initialStateUpdate encode failed:`, err);
-		}
-	}
-
-	return json({ ok: true, initialStateUpdate: initialStateUpdateBase64 });
-}
-
 async function createSnapshotFromLiveDoc(
 	env: Env,
 	vaultId: string,
@@ -766,7 +623,6 @@ const worker = {
 			&& (
 				url.pathname.startsWith("/vault/")
 				|| url.pathname.startsWith("/api/")
-				|| url.pathname.startsWith("/hub/")
 				|| url.pathname === "/claim"
 			)
 		) {
@@ -969,81 +825,6 @@ const worker = {
 			return await stub.fetch(req);
 		}
 
-		// Hub management routes: /hub/{hubVaultId}/...
-		const hubManagementMatch = url.pathname.match(
-			/^\/hub\/([^/]+)(\/spokes(?:\/([^/]+))?|\/invite)?$/,
-		);
-		if (hubManagementMatch) {
-			const token = getHttpAuthToken(req);
-			if (!authState.claimed) {
-				return withCors(json({ error: "unclaimed" }, 503));
-			}
-			if (!(await isAuthorized(authState, token))) {
-				return withCors(json({ error: "unauthorized" }, 401));
-			}
-			markClientSeen(env, ctx);
-
-			const hubVaultId = decodeAndValidateVaultId(hubManagementMatch[1] ?? "");
-			if (!hubVaultId) {
-				return withCors(json({ error: "invalid hub vaultId" }, 400));
-			}
-			const subPath = hubManagementMatch[2] ?? "";
-			const subParam = hubManagementMatch[3];
-
-			if (subPath === "" || subPath === "/spokes") {
-				if (req.method === "GET") {
-					const spokes = await listHubSpokes(env, hubVaultId);
-					return withCors(json({ spokes }));
-				}
-				if (req.method === "POST") {
-					// register a spoke
-					return withCors(await handleHubSpokeRegister(env, hubVaultId, req));
-				}
-			}
-
-			if (subPath.startsWith("/spokes/") && subParam) {
-				const spokeVaultId = decodeAndValidateVaultId(subParam);
-				if (!spokeVaultId) {
-					return withCors(json({ error: "invalid spoke vaultId" }, 400));
-				}
-				if (req.method === "DELETE") {
-					const hubStub = getHubRegistryStub(env, hubVaultId);
-					await hubStub.fetch(
-						`https://internal/__lodestone/hub/spokes/${encodeURIComponent(spokeVaultId)}`,
-						{ method: "DELETE" },
-					);
-					// Reset the spoke vault's mode to standalone. Awaited so the mode
-					// change is visible before this response returns, but removal from
-					// the registry (above) already succeeded either way — a failure
-					// here doesn't need to fail the whole DELETE.
-					const resetOk = await setVaultMode(env, spokeVaultId, "standalone");
-					if (!resetOk) {
-						console.warn(`${LOG_PREFIX} could not reset mode for removed spoke ${spokeVaultId}`);
-					}
-					return withCors(json({ ok: true }));
-				}
-			}
-
-			if (subPath === "/invite" && req.method === "GET") {
-				// Return the invite payload for the hub
-				if (authState.mode === "env") {
-					return withCors(json({
-						host: new URL(req.url).origin,
-						hubVaultId,
-						token: authState.envToken,
-					}));
-				}
-				// For claim mode, the token is hashed so we can't return it; caller must use
-				// the token they already have.
-				return withCors(json({
-					host: new URL(req.url).origin,
-					hubVaultId,
-					tokenNote: "Use your existing sync token to register spokes.",
-				}));
-			}
-
-			return withCors(json({ error: "not found" }, 404));
-		}
 
 		const vaultRoute = parseVaultPath(url.pathname);
 		if (!vaultRoute) {
@@ -1195,4 +976,4 @@ const worker = {
 };
 
 export default worker;
-export { ServerConfig, VaultSyncServer, HubRegistry };
+export { ServerConfig, VaultSyncServer };
