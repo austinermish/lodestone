@@ -38,7 +38,7 @@ phase section below.
 | **A** | 3.0.4 | ✅ shipped 2026-07-06 | Phase 1 (1.1–1.10) critical data-loss fixes + 10.1 (js-yaml runtime bump). Regression suite: `tests/phase1-critical-fixes-regressions.mjs`. |
 | **B** | 3.1.0 | ✅ shipped 2026-07-06 | Phase 2 (2.2–2.10) server security — 2.1 shipped earlier as part of live-testing fixes in 3.0.3. **2.6 intentionally NOT fixed** (audited, genuinely blocked on a `y-partyserver` limitation — see Phase 2 section). Server redeploy was required for this one. Regression suite: `tests/batch-b-security-regressions.mjs`. |
 | **C** | 3.2.0 | ✅ shipped 2026-07-10 | Phase 4 rooms, the fixable-without-a-new-feature subset: **4.3 revert loop (turned out to be 3 bugs — see 4.3, the fire-and-forget propagation fix is probably the bigger win)**, **4.4** setVaultMode race (blocking dependency for testing 4.3), **4.1 privacy leak** (fixed at the entry gate, not via `buildFilteredUpdate`), **4.5 investigated and deliberately deferred** (both plan-suggested fixes checked against real Yjs internals and found unsafe/ineffective — documented, not attempted), **4.7 diagnosed** (manual latency probe post-4.3-fix shows consistent ~150ms server-side propagation — the 4.3 fire-and-forget bug is the leading suspect for Austin's 15s delay; needs re-test to confirm), 4.8 already closed via README (no code change needed). Partial 4.6 room test suite (seeding, revert-loop, orphan-content-leak — 3 of ~5 planned scenarios; echo-suppression and 2.5.x ghost-file scenarios still open, folded into Batch C2). |
-| **C2** | 3.3.0 | pending — split out from C, see below | **4.2 room-scoped tokens + 4.6a per-room server topology** — the topology decision is made (each hub runs its own Worker, fully independent hub↔spoke relationships; interim guardrails already shipped in 3.0.3) but the actual implementation is a genuinely large, security-sensitive feature: `RoomConfig` gains host/token, a new server endpoint mints room-scoped credentials, client-side routing sends each room's VaultSync/DiskMirror/blob traffic to its own server, plus settings UI. Deliberately NOT compressed into Batch C's timeframe — a security-sensitive auth feature deserves its own dedicated pass, not leftover time after three unplanned bug discoveries. Round out 4.6's remaining test scenarios (echo suppression, 2.5.x ghost-file cases) alongside it. |
+| **C2** | 3.3.0 | ⏳ in progress 2026-07-11 | **Major mid-batch discovery: the entire hub/spoke DO-to-DO bridge system (HubRegistry, setVaultMode, apply-spoke-update/apply-hub-update, propagateCrossVault, structural rejection/revert — i.e. most of what Batch C fixed) turned out to be dead code, unreachable from the real client since May 2026 — see the correction banner at the top of Phase 4 for the full story.** Decided with Austin: delete it rather than revive it. Revised C2 scope: (1) delete the dead bridge + its tests (done), (2) **4.2 + 4.6a redesigned for the real same-DO architecture** — much simpler than originally scoped, since there's no bridge to build auth for: `RoomConfig` gains optional host/token, a new per-room-DO mint/verify endpoint issues room-scoped tokens, `startRoomSync` routes per-room, `handleRoomJoinParams` simplifies (no more cross-server block), (3) **4.10 — tighten + honestly document the client-side structural write-gate** (decided: stay client-side, not a security boundary, say so in the README), (4) 4.7's "probably fixed" conclusion retracted (it fixed dead code) — back to unconfirmed, (5) 4.1/4.3/4.4/4.5 marked moot (fixed dead code, since deleted) but kept in this doc as case-study history, not deleted from the plan. |
 | D | 3.3.x | pending | Phase 8 test gaps (blobSync suite first — zero coverage on 1,320 lines) + Phase 9 release/docs hygiene incl. README revision (9.7). |
 | E | 3.4.0 | pending | Phase 6 main.ts decomposition (no behavior change intended; run full test suite after each extraction step, not just at the end). |
 | F | 3.5.0 | pending | Phase 7 remainder: settings redesign (7.15–7.24), first-run modal, R2 flow, quick-win copy. Several Phase 7 items already shipped opportunistically during live-testing sessions (claim-page resume + connection auto-detect, settings auto-refresh, invite-click routing fix, `workers_dev` default) — check each 7.x item against current code before re-implementing, some may already be done. |
@@ -339,12 +339,72 @@ meaning no token, host, vault ID, disk index, or blob queue on every device.
 ## Phase 4 — Rooms (hub/spoke) privacy & correctness
 
 The rooms feature has the highest defect density (consistent with 2.5.x history).
-Treat 4.1–4.2 as security work.
+Treat 4.2/4.6a as security work.
+
+> ### ⚠️ MAJOR CORRECTION (2026-07-11, Batch C2): 4.1/4.3/4.4/4.5 were fixing
+> ### **dead code**. Read this before touching anything below.
+>
+> While investigating 4.2/4.6a (per-room server topology), discovered that the
+> entire hub/spoke DO-to-DO bridge system — `HubRegistry`, `setVaultMode`,
+> `apply-spoke-update`/`apply-hub-update`, `propagateCrossVault`, the
+> structural-rejection gate, the revert-loop machinery — is **unreachable dead
+> code from the real client**. Confirmed by a hard dependency chain: nothing
+> in `src/` ever calls `POST /hub/{id}/spokes` (the only thing that moves a
+> room DO's mode off `"standalone"`), so `propagateCrossVault`'s mode checks
+> were always false in production, regardless of any fix applied to that path.
+>
+> **Why this happened**: this was the *original* hub/spoke architecture (May
+> 11 2026, `a53f0ca`) — one Durable Object per vault, bridged via HTTP. It was
+> explicitly superseded the next day (`b3d89b4`, "replace hub+spoke model with
+> real-time collaboration rooms") by the architecture actually in use today:
+> **a hub and every spoke connect to the exact same Durable Object** (same
+> `roomId` used as `vaultId` on both sides) and sync via ordinary Yjs
+> collaborative WebSocket editing — the same mechanism as two devices on one
+> person's vault. That commit deleted the client-side code that called the
+> bridge, but the server-side bridge code was never deleted, and — this is the
+> important part — it kept receiving genuine, well-tested bug fixes for two
+> more months (including all of 4.1/4.3/4.4 below, shipped in v3.2.0) because
+> `"hub"`/`"spoke"` survived as *role labels* on the new `RoomConfig`, creating
+> the appearance that the old machinery was still load-bearing. It wasn't.
+>
+> **What this means**:
+> - 4.1, 4.3, 4.4 (shipped in v3.2.0) were correct fixes to real bugs in real
+>   code — but that code never ran during Austin's live testing, so none of
+>   those fixes changed observed behavior. **The bridge system has since been
+>   deleted** (v3.3.0) rather than revived — see the status notes on each item
+>   below for what was removed.
+> - 4.7's "diagnosed, probably fixed" conclusion (the fire-and-forget
+>   propagation fix) is **retracted** — that fix was to the same dead code.
+>   4.7 needs fresh investigation; see its updated section.
+> - What actually gates a spoke from creating files in a shared room is (and
+>   always was) a **client-side write-gate** — `getRoomSyncAndCrdtPath`'s
+>   `hubIncludePaths` check in `main.ts`, which simply never routes a
+>   non-matching new file into the shared Y.Doc. It's an omission, not a
+>   rejection, and it's not a hard security boundary (a modified/malicious
+>   spoke client could bypass it entirely, since the server never checks).
+>   **Decision (Austin, 2026-07-11): keep it client-side-only for now,
+>   tighten it, and document the limitation honestly** rather than build
+>   real server-side enforcement in the shared DO (the more correct but much
+>   larger alternative that was on the table). See 4.10.
 
 ### 4.1 `buildFilteredUpdate` pass-through → cross-vault content leak
-- **STATUS: PARTIALLY FIXED 2026-07-10 (Batch C, v3.2.0) — the actual leak vector
-  closed at the point of entry; `buildFilteredUpdate` itself intentionally left
-  as a documented pass-through (see below for why).**
+- **STATUS: MOOT — the code this fixed was deleted 2026-07-11 (Batch C2) as
+  part of the dead hub/spoke bridge system (see the correction banner above).
+  `findContentTouchedFileIds`, `isMetaTombstoned`, and the
+  `apply-spoke-update` gate this section describes no longer exist.** The
+  underlying question this item was chasing — "can a spoke leak content to
+  other spokes it shouldn't have access to?" — needs re-asking against the
+  REAL architecture (single shared Y.Doc, no per-spoke filtering of any kind
+  today): since every participant in a room shares the literal same document,
+  there is currently no concept of "a spoke shouldn't see this" at all —
+  anyone in a room sees everything in that room's Y.Doc, always. If that's
+  not the intended privacy model, it needs a fresh design against the real
+  architecture, not a revival of this section's fix. Kept below for history
+  only.
+- **Original status note (now superseded): "PARTIALLY FIXED 2026-07-10 (Batch
+  C, v3.2.0)" — the actual leak vector closed at the point of entry;
+  `buildFilteredUpdate` itself intentionally left as a documented
+  pass-through (see below for why).**
 - **What the finding actually described**: a body edit (content-only, touches
   only a Y.Text's own internal structure, not the containing map's keys) to a
   fileId with no LIVE hub-known meta entry passes `updateTouchesStructure`
@@ -396,21 +456,53 @@ Treat 4.1–4.2 as security work.
   the hub with an orphan idToText/pathToId entry with no meta, confirms a
   spoke legitimately receives it via the (unfiltered) initial seed, has the
   spoke edit its body, and asserts the hub rejects the edit and its own
-  document is unmodified by it.
+  document is unmodified by it. **Deleted 2026-07-11** along with the code it tested.
 
 ### 4.2 Room invites embed the vault-wide server token
-- **Where:** `src/settings.ts:717-729` (`buildRoomInviteUrl`); rooms reuse
-  `settings.token` (`main.ts:3394-3404`); also `/hub/{id}/invite` reflects the env
-  token (`server/src/index.ts:883-889`)
-- **Fix (proper):** server-minted, room-scoped tokens — a `/pair` or
-  `/room/{id}/token` endpoint issuing scoped credentials; auth middleware accepts
-  either the master token or a room token scoped to that room's DO + blobs.
-  This same mechanism serves onboarding items 7.10/7.12.
-- **Fix (interim):** bold warning in the invite modal that the link grants
-  full-server access.
+- **STATUS: REDESIGNED 2026-07-11 for the real (same-DO) architecture — being
+  implemented now as part of Batch C2 (v3.3.0), together with 4.6a below;
+  they're one feature, not two.** The `/hub/{id}/invite` endpoint mentioned in
+  the original finding was part of the deleted bridge system and no longer
+  exists; `buildRoomInviteUrl` (`src/settings.ts`) is still the real invite
+  builder and still the thing this fixes.
+- **Design** (real architecture: a room is "connect to `vaultId=roomId` on
+  some host with some token" — no DO-to-DO bridge involved at all, which
+  makes this much simpler than originally scoped):
+  - New internal route on `VaultSyncServer` (the room's own DO — every room
+    already has exactly one DO, keyed by roomId, so no new DO class needed):
+    `POST /__lodestone/mint-room-token` generates a random token, hashes it,
+    stores the hash in `ctx.storage`, returns the plaintext once.
+    `POST /__lodestone/verify-room-token` hashes a presented token and
+    compares against the stored hash.
+  - New public route: `POST /vault/{roomId}/room-token` — requires the
+    **master** token (existing `isAuthorized` check, no fallback), calls the
+    DO's internal mint route, returns `{token}` to the client.
+  - Auth fallback, scoped narrowly: for the WS sync route and the `blobs`
+    sub-resource only (**not** `debug` or `snapshots`, which stay
+    master-token-only) — if the master-token check fails, try the target
+    vaultId's own `verify-room-token`; treat a match as authorized for that
+    request. A token minted for room X only ever verifies true against room
+    X's own DO, so this can't leak into other rooms or the owner's main vault.
+  - Client: `createRoom` (hub side) mints a room-scoped token via the new
+    endpoint and uses it (not the master token) when building the invite.
+    `buildRoomInviteUrl`'s params are unchanged (`host`, `token`, `roomId`,
+    `name`, `paths`) — this is a value change (scoped token instead of
+    master token), not a URL-format change, so old and new invite links
+    parse identically on the receiving end.
+- **This also directly enables 4.6a** (a room living on a different Worker
+  than the vault's main connection) — see that section; the two were
+  designed together.
 
 ### 4.3 Structural-rejection revert loop
-- **STATUS: FIXED 2026-07-10 (Batch C, v3.2.0) — turned out to be three bugs, not one.**
+- **STATUS: MOOT — the code this fixed was deleted 2026-07-11 (Batch C2), see
+  the correction banner at the top of Phase 4. All three sub-bugs described
+  below were real and the fixes were correct, but the entire code path
+  (`propagateCrossVault`, `revertRejectedStructuralChange`,
+  `_lastRevertStateVector`, etc.) has since been removed as dead code rather
+  than kept. Kept below for history — it's a legitimately interesting
+  three-bugs-in-one-investigation case study, just not live code anymore.**
+- **Original status note (now superseded): "FIXED 2026-07-10 (Batch C,
+  v3.2.0) — turned out to be three bugs, not one."**
   Investigating the originally-scoped livelock surfaced two more severe latent
   bugs in the same code path; all three are fixed together:
   1. **The livelock as scoped**: `_applyingCrossVaultUpdate` is reset to `false`
@@ -456,16 +548,28 @@ Treat 4.1–4.2 as security work.
   tombstone's `deletedAt` is stable across a second wait window (no loop), and
   (c) exactly one `spoke-structural-change-reverted` trace event was recorded
   (not a growing count). All three would have caught the pre-fix bugs.
+  **Deleted 2026-07-11** along with the code it tested.
 
 ### 4.4 `setVaultMode` fire-and-forget at registration
-- **Where:** `server/src/index.ts:581-583`
-- **Fix:** await it; fail registration loudly if the mode write fails.
+- **STATUS: MOOT — `setVaultMode` and the whole registration endpoint it
+  supported were deleted 2026-07-11 (Batch C2), see the correction banner at
+  the top of Phase 4.**
+- **Original where/fix (now superseded): `server/src/index.ts:581-583` —
+  await it; fail registration loudly if the mode write fails.**
 
 ### 4.5 Per-update full-document clone in the spoke gate
-- **STATUS: INVESTIGATED 2026-07-10, DEFERRED — not a safe fix within Batch C's
-  risk budget.** Where: `server/src/server.ts` `extractStructuralKeys`
-  (renumbered from the plan's original 631-670 during the 4.3 refactor; still
-  the same function).
+- **STATUS: MOOT — `extractStructuralKeys` (the function this item is about)
+  was deleted 2026-07-11 (Batch C2) along with the rest of the dead bridge
+  system, see the correction banner at the top of Phase 4. The investigation
+  below (both Yjs-internals findings) may still be useful if server-side
+  structural enforcement is ever built for the real same-DO architecture
+  (see 4.10) — the same "replay into a clone is correct but O(doc size) per
+  call" tradeoff, and the same reason a raw `Y.decodeUpdate`-based rewrite is
+  unsafe, would apply to any fresh implementation of that check.**
+- **Original status note (now superseded): "INVESTIGATED 2026-07-10, DEFERRED
+  — not a safe fix within Batch C's risk budget."** Where:
+  `server/src/server.ts` `extractStructuralKeys` (renumbered from the plan's
+  original 631-670 during the 4.3 refactor; still the same function).
 - **Option (a) from the plan — "cache one probe doc per burst" — does not
   actually help.** The expensive part is `Y.encodeStateAsUpdate(this.document)`,
   and the realistic hot path this item worries about is an actively-editing
@@ -499,31 +603,66 @@ Treat 4.1–4.2 as security work.
   across many structural/non-structural cases) rather than as a quick patch.
 
 ### 4.6a Per-room server credentials / multi-server topology *(added 2026-07-06 from live testing)*
-- **Today**: rooms are pinned to the vault's single connection (`settings.host`/`token`).
-  A vault with no connection that joins a room **adopts the inviter's server as its
-  own vault sync server** (whole vault syncs there, not just the shared folder) —
-  now gated behind an explicit ConfirmModal in `handleRoomJoinParams`. A vault whose
-  connection differs from the invite's host cannot join at all (join now aborts with
-  an honest notice; previously it silently "joined" a nonexistent room on the wrong
-  server).
-- **DECIDED (Austin, 2026-07-06): each hub runs its own worker.** Every hub↔spokes
-  relationship is fully independent — a spoke that becomes a hub deploys its own
-  worker for its own room; that instance is completely separate from the room it
-  spokes into. Implementation: store `host`/`token` per room in `RoomConfig`, route
-  each room's VaultSync/DiskMirror/blob traffic to its room's server, and keep the
-  Connection section strictly for the vault's own device sync. Depends on
-  room-scoped tokens (4.2) to avoid handing every spoke the master token of every
-  server in the chain.
-- **Status note**: seeding bug 2.1 was FIXED in 3.0.3 (chunked base64 + seed push
-  moved ahead of the encode) — spokes now receive existing hub files at
-  registration, not just new deltas. Existing broken rooms heal by leaving and
-  rejoining after the server update.
+- **STATUS: BEING IMPLEMENTED 2026-07-11 (Batch C2, targeting v3.3.0) — and
+  substantially SIMPLER than originally scoped**, now that the real
+  architecture is understood (correction banner at the top of Phase 4). A
+  room is just "connect this room's `VaultSync` to `vaultId=roomId` on some
+  host with some token" — there is no DO-to-DO bridge to design auth for, so
+  this is closer to a settings/routing change than the multi-server-topology
+  feature originally imagined.
+- **Before this fix**: rooms are pinned to the vault's single connection
+  (`settings.host`/`token`). A vault with no connection that joins a room
+  **adopts the inviter's server as its own vault sync server** (whole vault
+  syncs there, not just the shared folder) — gated behind an explicit
+  ConfirmModal in `handleRoomJoinParams` (shipped 3.0.3 as an interim
+  guardrail). A vault whose connection differs from the invite's host cannot
+  join at all — the join aborts with an honest notice (also 3.0.3) instead of
+  silently joining a nonexistent room on the wrong server, which is what
+  happened before that fix.
+- **DECIDED (Austin, 2026-07-06): each hub runs its own worker.** Every
+  hub↔spokes relationship is fully independent — a spoke that becomes a hub
+  deploys its own worker for its own room; that instance is completely
+  separate from the room it spokes into.
+- **Implementation** (paired with 4.2 above — one feature):
+  1. `RoomConfig` (`src/settings.ts`) gains optional `host?: string; token?:
+     string;` — `undefined` means "fall back to `settings.host`/`token`"
+     (backward compatible: existing rooms with neither field keep working
+     exactly as today).
+  2. `startRoomSync` (`src/main.ts`) uses `room.host ?? this.settings.host` /
+     `room.token ?? this.settings.token` instead of unconditionally spreading
+     `...this.settings`.
+  3. `handleRoomJoinParams` simplifies significantly: no more cross-server
+     block, no more "adopt this as my main connection" behavior — the
+     invite's `host`/`token` (now a room-scoped token per 4.2, not the master
+     token) are stored directly on the joining vault's `RoomConfig`, used
+     only for that room's connection. The scary ConfirmModal about "this
+     will become your vault's main sync server" goes away because it's no
+     longer true — joining a room never touches the vault's own main
+     connection anymore, regardless of whether the vault has one.
+  4. Per-room `BlobSyncManager`/capabilities cache also need the same
+     `room.host ?? settings.host` treatment if attachment sync inside rooms
+     on a different server is wanted — currently blob sync is global,
+     singular, and tied to `this.vaultSync` only (see the Explore agent
+     report from 2026-07-11 in session history for exact call sites if this
+     part isn't done yet when you read this).
+- **Status note**: the old seeding bug (2.1, fixed in 3.0.3) doesn't apply to
+  the real architecture at all — a spoke connecting to an existing roomId
+  gets the full document for free via the normal y-partyserver WS sync
+  handshake, no explicit seed push needed. That whole mechanism was part of
+  the deleted bridge system.
 
 ### 4.6 Room sync regression tests
-- No tests reference the 2.5.8/2.5.9 room fixes. Add a `tests/room-sync-*` suite
-  covering: seeding (incl. >200 KB docs, per 2.1), echo suppression, structural
-  rejection/revert, spoke-private content isolation (per 4.1), ghost-file scenarios
-  from the 2.5.x fix log.
+- **STATUS: RESET 2026-07-11 for the real architecture.** The seeding,
+  structural-rejection/revert, and spoke-private-isolation tests written for
+  Batch C (`room-seed-scale-check.mjs`, `room-revert-loop-regression.mjs`,
+  `room-orphan-content-leak-regression.mjs`) all exercised the deleted bridge
+  system and were deleted with it. `room-seed-scale-check.mjs` was rewritten
+  as `tests/room-same-doc-sync-check.mjs` — same >100KB-scale coverage, but
+  testing the REAL mechanism (plain WS sync to a shared roomId, no
+  registration/seed step). Echo suppression and the 2.5.x ghost-file
+  scenarios were never covered and are still open — write against the real
+  same-DO architecture (ordinary Yjs collaborative editing) if pursued, not
+  against the bridge's semantics.
 
 ### 4.7 New-file live-editing delay in rooms *(added 2026-07-08 from live testing)*
 - **Symptom (Austin, hub↔spoke live test)**: hub creates a file in the shared
@@ -565,41 +704,43 @@ Treat 4.1–4.2 as security work.
 - **Not a hard limitation**: worth trying to fix. 15s is a client-side stall
   signature, not physics — do not tell users this is a permanent CRDT tradeoff
   without confirming the investigation above first.
-- **UPDATE 2026-07-10 (Batch C): the leading server-side suspect is now fixed
-  as a side effect of the 4.3 investigation — re-test before doing anything
-  else here.** 4.3 found `propagateCrossVault`'s hub→spoke fan-out
-  (`propagateHubToSpokes`) was fire-and-forget with nothing keeping it alive
-  once `onSave()` returned, and in the real runtime this background work
-  frequently never completed at all. That call is on the path for **every**
-  hub edit reaching a spoke, not just the originally-scoped structural-
-  rejection case — a very plausible full explanation for 15-second-plus
-  delays before a spoke sees a hub's edits. Now properly awaited (same fix as
-  4.3). Diagnostic measurement after the fix
-  (`tests/manual/room-new-file-latency-check.mjs`, not wired into CI — a
-  manual timing probe, not a pass/fail test): hub creates a brand-new file and
-  makes 7 subsequent content edits to it while a spoke is already connected;
-  **every single one — the structural create AND every content edit —
-  propagated to the spoke in a consistent ~150-160ms**, matching the
-  100ms `debounceWait` + network round-trip almost exactly, with zero
-  variance and zero multi-second stalls observed. That measurement is
-  server-only (a raw Yjs client over WebSocket, no Obsidian plugin involved),
-  so it can't rule out the OTHER original hypothesis (the plugin-side
-  editor-binding/1.5-disk-reseed-guard race) — but it strongly suggests the
-  server was the actual bottleneck Austin hit.
-- **Next step, in order**: (1) Austin re-tests the exact original scenario
-  (hub creates file in shared folder, spoke opens and types immediately) on
-  this release. (2) If the delay is gone: close this item, no plugin-side
-  work needed. (3) If the delay persists: the server is now proven fast, so
-  the investigation should pivot entirely to the plugin's editor-binding path
-  (the original "leading hypothesis" above) — trace-log reproduction on both
-  devices is still the right tool, but the server-side propagation timeline
-  no longer needs to be part of what's captured.
+- **UPDATE 2026-07-10 (Batch C), RETRACTED 2026-07-11 (Batch C2): the "leading
+  server-side suspect is fixed" conclusion below was WRONG — it fixed dead
+  code.** 4.3's `propagateCrossVault`/`propagateHubToSpokes` fire-and-forget
+  fix (and the `tests/manual/room-new-file-latency-check.mjs` measurement
+  showing consistent ~150ms propagation "after the fix") was entirely inside
+  the hub/spoke DO-to-DO bridge system, which — per the correction banner at
+  the top of Phase 4 — is unreachable from the real client. The measurement
+  itself is real (that code, if it ran, would propagate in ~150ms) but it
+  says nothing about the actual live scenario, which goes through the
+  same-DO WS sync path, code this investigation never touched. **This item is
+  back to unconfirmed. The original leading hypothesis (below, from
+  2026-07-08) is the one still standing** — re-read it fresh, the retracted
+  paragraph that used to follow it is deleted.
+- **Next step, in order**: (1) reproduce with `debug: true` + trace logging on
+  both devices per the original investigation plan above — capture the
+  timeline of room meta/pathToId arrival vs. diskMirror write-queue drain vs.
+  editor bind/seed-mismatch/rebind events (1.5's guard) vs. awareness/cursor
+  broadcast, for a freshly created room file. (2) If 1.5's guard is
+  retriggering repeatedly in that window, widen its size-plausibility
+  tolerance for very-recently-created paths, or gate it off entirely for
+  paths with no prior local content. (3) If the room-binding-routing race is
+  the actual cause instead, the fix belongs with the Phase 6 `roomManager.ts`
+  extraction — rooms need to resolve "is this path room-managed" from
+  meta/pathToId directly rather than through whatever ordering holds today.
 
 ### 4.8 Spoke-created files never propagate, with no user-visible signal *(added 2026-07-08, confirmed-intended behavior)*
 - **Observed (Austin)**: a spoke creating a file in the shared folder does not
-  appear on the hub. **This matches the documented hub/spoke design exactly** —
-  structural changes (create/rename/move/delete) are host-only, rejected
-  server-side as `structural-change-not-permitted` (server.ts). Not a bug.
+  appear on the hub. **Matches the documented intent** (structural changes
+  are host-only) but **the mechanism description below is corrected as of
+  2026-07-11**: this is NOT a server-side rejection — `structural-change-not-
+  permitted` was part of the deleted bridge system (correction banner, top of
+  Phase 4) and never actually ran. What really happens: a client-side
+  write-gate (`getRoomSyncAndCrdtPath`'s `hubIncludePaths` check in
+  `src/main.ts`) simply never routes a spoke's new file into the shared
+  Y.Doc if its path doesn't match what the invite shared — an omission, not
+  a rejection, and not enforced server-side at all. See 4.10 for the decision
+  on tightening and documenting this honestly.
 - **Small UX gap worth closing eventually**: the rejected file just sits on the
   spoke's local disk forever, unsynced, with no notice to the user that it will
   never propagate. A future Phase 7 item: detect a locally-created file inside a
@@ -629,6 +770,35 @@ Treat 4.1–4.2 as security work.
   logic in 1.3/4.3 for the multi-structural-writer case.
 - **Do not start this without an explicit go-ahead** — it's a meaningfully
   larger scope than a settings-field add, given the above.
+
+### 4.10 Tighten the client-side structural write-gate; document the limitation *(added 2026-07-11, decided)*
+- **Decision (Austin, 2026-07-11)**: given the choice between building real
+  server-side structural enforcement in the shared room DO (correct, but a
+  genuinely new feature — the DO would need to know which connection sent a
+  transaction and reject/allow based on that, something the current
+  same-document model has no concept of) versus keeping the existing
+  client-side write-gate and just tightening + documenting it — **keep it
+  client-side, for now.**
+- **What "tighten" means**: `getRoomSyncAndCrdtPath`'s current
+  `hubIncludePaths` matching (folder-prefix, per the Explore agent's report)
+  should become a strict allow-list rather than a loose prefix match, so a
+  spoke can't accidentally (or deliberately) create files anywhere under a
+  shared folder path that happens to share a prefix with what was actually
+  invited. Exact semantics (folder-boundary match vs. exact-file match) need
+  a decision when implementing — re-check `hubIncludePaths`' actual current
+  matching logic first, the Explore report's description ("folder-level
+  paths... prefix matching") was inferred, not verified against the literal
+  comparison code.
+- **What "document" means**: the README's Rooms section and FAQ (added
+  2026-07-08) currently describe host-only structural changes without
+  qualification. Add a line making clear this is enforced by the plugin, not
+  the server — a modified or malicious client could bypass it — so nobody
+  relies on it as a real security boundary between untrusted parties in a
+  room. This is an honesty fix, not a behavior change.
+- **Explicitly not doing (per the decision above)**: real per-connection
+  server-side enforcement in `VaultSyncServer`. If this changes later, 4.9's
+  "hub-configurable spoke permissions" idea and this item would likely merge
+  into one design — both need the server to know who sent what.
 
 ---
 
